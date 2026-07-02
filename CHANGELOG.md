@@ -21,10 +21,10 @@
 
 - **feat(writes): `dry_run` on `create_object`** for parity with update/delete —
   validates and returns the intended payload without issuing the POST.
-- **feat(writes): startup write-permission preflight.** When writes are enabled,
-  the server probes the token via `OPTIONS` on a representative endpoint and
-  refuses to start if the `Allow` header indicates a read-only token. Network
-  failures are advisory (non-blocking).
+- **feat(writes): advisory startup write-endpoint preflight.** When writes are
+  enabled, the server probes a representative endpoint via `OPTIONS` to confirm
+  it advertises write methods. Actual token permissions are enforced by NetBox
+  on mutation; probe failures are advisory (non-blocking).
 - **feat(observability): plugin-aware write warning.** When writes and plugin
   discovery are both enabled, startup names how many plugin object types are on
   the writable surface.

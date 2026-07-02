@@ -931,15 +931,26 @@ def main() -> None:
                 "Confirm these are intended to be mutable."
             )
 
-        # Preflight: fail fast on the common misconfig of a read-only token.
+        # Advisory preflight: OPTIONS tells us whether the endpoint advertises
+        # write methods. NetBox still enforces token permissions on mutation.
         try:
-            netbox.verify_write_access()
-        except PermissionError as e:
-            logger.error(f"Write-tool preflight failed: {e}")
-            sys.exit(1)
+            methods = netbox.verify_write_endpoint_available()
+            if methods:
+                logger.info(
+                    "Representative write endpoint dcim/sites advertises methods: "
+                    f"{', '.join(sorted(methods))}"
+                )
+            else:
+                logger.warning(
+                    "Could not verify representative write endpoint at startup: "
+                    "OPTIONS returned no Allow header. Continuing; NetBox will "
+                    "enforce token permissions on mutation."
+                )
         except Exception as e:
-            # Probe failed for network/HTTP reasons — advisory, non-blocking.
-            logger.warning(f"Could not verify token write permissions at startup (continuing): {e}")
+            logger.warning(
+                "Could not verify representative write endpoint at startup "
+                f"(continuing; NetBox will enforce token permissions on mutation): {e}"
+            )
 
     try:
         if settings.transport == "stdio":

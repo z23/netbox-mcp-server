@@ -85,6 +85,7 @@ def _stub_main_deps(monkeypatch, *, enable_writes: bool):
     monkeypatch.setattr(server_module, "Settings", lambda **_: settings)
     monkeypatch.setattr(server_module, "configure_logging", lambda _: None)
     monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: MagicMock())
+    monkeypatch.setattr(server_module, "mcp", FastMCP("test-main"))
 
     # mcp.run would block; replace with no-op.
     monkeypatch.setattr(server_module.mcp, "run", lambda **_: None)
@@ -105,38 +106,38 @@ def test_main_registers_writes_when_setting_true(monkeypatch):
 
 
 # ============================================================================
-# main() wiring: write-permission preflight probe
+# main() wiring: advisory write-endpoint preflight probe
 # ============================================================================
 
 
 def test_main_calls_write_preflight_when_writes_enabled(monkeypatch):
-    """When writes are enabled, main() must invoke verify_write_access()."""
+    """When writes are enabled, main() must invoke the advisory endpoint probe."""
     mock_client = MagicMock()
     _stub_main_deps(monkeypatch, enable_writes=True)
     monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: mock_client)
 
     server_module.main()
-    mock_client.verify_write_access.assert_called_once_with()
+    mock_client.verify_write_endpoint_available.assert_called_once_with()
 
 
-def test_main_exits_when_preflight_reports_read_only_token(monkeypatch):
-    """A PermissionError from the probe must terminate startup."""
+def test_main_continues_when_preflight_reports_endpoint_without_write_methods(monkeypatch):
+    """The advisory probe must not block startup when endpoint support is unclear."""
     mock_client = MagicMock()
-    mock_client.verify_write_access.side_effect = PermissionError("read-only token")
+    mock_client.verify_write_endpoint_available.side_effect = RuntimeError("no write methods")
     _stub_main_deps(monkeypatch, enable_writes=True)
     monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: mock_client)
 
-    with pytest.raises(SystemExit):
-        server_module.main()
+    server_module.main()
+    mock_client.verify_write_endpoint_available.assert_called_once_with()
 
 
 def test_main_continues_when_preflight_raises_network_error(monkeypatch):
     """Non-PermissionError failures are advisory — startup must continue."""
     mock_client = MagicMock()
-    mock_client.verify_write_access.side_effect = httpx.ConnectError("dns failure")
+    mock_client.verify_write_endpoint_available.side_effect = httpx.ConnectError("dns failure")
     _stub_main_deps(monkeypatch, enable_writes=True)
     monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: mock_client)
 
     # Should not raise — server starts despite an ambiguous probe.
     server_module.main()
-    mock_client.verify_write_access.assert_called_once_with()
+    mock_client.verify_write_endpoint_available.assert_called_once_with()

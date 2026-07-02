@@ -132,7 +132,7 @@ def get_stuff(t, f):
 ### Architecture Patterns
 
 - **Abstraction layer**: `NetBoxClientBase` defines interface for future ORM implementation
-- **Read-only by default, opt-in writes**: GET tools are always registered. `create_object`/`update_object`/`delete_object` only register when `ENABLE_WRITES=true`; the gate lives in `_register_write_tools()` and is called from `main()`. `delete_object` additionally requires `confirm=True`. All three write tools support `dry_run=True` to preview without mutating. At startup, `main()` runs `netbox.verify_write_access()` (an `OPTIONS` probe of the `Allow` header) and refuses to start if the token is read-only. Mutations are logged at INFO by the tool layer in addition to NetBox's changelog.
+- **Read-only by default, opt-in writes**: GET tools are always registered. `create_object`/`update_object`/`delete_object` only register when `ENABLE_WRITES=true`; the gate lives in `_register_write_tools()` and is called from `main()`. `delete_object` additionally requires `confirm=True`. All three write tools support `dry_run=True` to preview without mutating. At startup, `main()` runs `netbox.verify_write_endpoint_available()` (an advisory `OPTIONS` probe of the `Allow` header) to confirm a representative endpoint advertises write methods. Actual token permissions are enforced by NetBox on each mutation. Mutations are logged at INFO by the tool layer in addition to NetBox's changelog.
 - **Environment-based config**: All secrets via environment variables, never hardcoded
 - **Explicit object mapping**: `NETBOX_OBJECT_TYPES` dictionary maintains allowed types
 
