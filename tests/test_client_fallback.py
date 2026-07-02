@@ -371,11 +371,14 @@ def test_delete_falls_back_on_404(client):
     with patch.object(client.session, "delete") as mock_delete:
         mock_delete.side_effect = [primary, fallback]
 
-        assert client.delete(
-            "vpn/tunnels",
-            1,
-            fallback_endpoint="plugins/vpn/tunnels",
-        ) is True
+        assert (
+            client.delete(
+                "vpn/tunnels",
+                1,
+                fallback_endpoint="plugins/vpn/tunnels",
+            )
+            is True
+        )
         assert mock_delete.call_count == 2
 
 
@@ -389,3 +392,68 @@ def test_delete_returns_false_on_non_204_success(client):
         mock_delete.return_value = response
 
         assert client.delete("dcim/sites", 1) is False
+
+
+# ============================================================================
+# verify_write_access(): non-mutating OPTIONS probe against Allow header
+# ============================================================================
+
+
+def test_verify_write_access_passes_when_allow_has_write_methods(client):
+    """An Allow header including POST/PATCH/etc means the token can write."""
+    response = MagicMock()
+    response.headers = {"Allow": "GET, POST, PATCH, PUT, DELETE, HEAD, OPTIONS"}
+    response.raise_for_status = MagicMock()
+
+    with patch.object(client.session, "options") as mock_options:
+        mock_options.return_value = response
+        # Should not raise.
+        client.verify_write_access()
+        mock_options.assert_called_once()
+
+
+def test_verify_write_access_raises_when_allow_is_read_only(client):
+    """An Allow header without write methods indicates a read-only token."""
+    response = MagicMock()
+    response.headers = {"Allow": "GET, HEAD, OPTIONS"}
+    response.raise_for_status = MagicMock()
+
+    with patch.object(client.session, "options") as mock_options:
+        mock_options.return_value = response
+        with pytest.raises(PermissionError, match="read-only"):
+            client.verify_write_access()
+
+
+def test_verify_write_access_passes_when_allow_header_missing(client):
+    """An absent/empty Allow header is ambiguous — don't block startup."""
+    response = MagicMock()
+    response.headers = {}  # no Allow header
+    response.raise_for_status = MagicMock()
+
+    with patch.object(client.session, "options") as mock_options:
+        mock_options.return_value = response
+        client.verify_write_access()  # should not raise
+
+
+def test_verify_write_access_passes_when_allow_header_empty(client):
+    """An empty Allow header value is also treated as ambiguous."""
+    response = MagicMock()
+    response.headers = {"Allow": ""}
+    response.raise_for_status = MagicMock()
+
+    with patch.object(client.session, "options"):
+        client.verify_write_access()  # should not raise
+
+
+def test_verify_write_access_surfaces_options_http_error(client):
+    """A failing OPTIONS request propagates the HTTPStatusError to the caller."""
+    response = MagicMock()
+    response.status_code = 500
+    response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Server Error", request=MagicMock(), response=MagicMock()
+    )
+
+    with patch.object(client.session, "options") as mock_options:
+        mock_options.return_value = response
+        with pytest.raises(httpx.HTTPStatusError):
+            client.verify_write_access()

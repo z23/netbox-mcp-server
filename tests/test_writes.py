@@ -11,7 +11,6 @@ from netbox_mcp_server.server import (
     netbox_update_object,
 )
 
-
 # ============================================================================
 # Create
 # ============================================================================
@@ -64,6 +63,32 @@ def test_create_object_passes_fallback_endpoint(mock_netbox, mock_types):
     mock_netbox.create.assert_called_once_with(
         "vpn/tunnels", {"name": "t"}, fallback_endpoint="plugins/vpn/tunnels"
     )
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_create_object_dry_run_returns_proposed_without_create(mock_netbox):
+    """dry_run=True validates the request and never calls the client."""
+    result = netbox_create_object(
+        object_type="dcim.site",
+        data={"name": "test-site", "slug": "test-site"},
+        dry_run=True,
+    )
+
+    mock_netbox.create.assert_not_called()
+    assert result == {
+        "dry_run": True,
+        "object_type": "dcim.site",
+        "endpoint": "dcim/sites",
+        "proposed": {"name": "test-site", "slug": "test-site"},
+    }
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_create_object_dry_run_still_validates_type(mock_netbox):
+    """dry_run does not bypass input validation."""
+    with pytest.raises(ValueError, match="Invalid object_type"):
+        netbox_create_object(object_type="not.real", data={"name": "x"}, dry_run=True)
+    mock_netbox.create.assert_not_called()
 
 
 # ============================================================================
@@ -137,13 +162,9 @@ def test_update_object_dry_run_returns_diff_without_patch(mock_netbox):
 def test_delete_object_happy_path(mock_netbox):
     mock_netbox.delete.return_value = True
 
-    result = netbox_delete_object(
-        object_type="dcim.site", object_id=99, confirm=True
-    )
+    result = netbox_delete_object(object_type="dcim.site", object_id=99, confirm=True)
 
-    mock_netbox.delete.assert_called_once_with(
-        "dcim/sites", 99, fallback_endpoint=None
-    )
+    mock_netbox.delete.assert_called_once_with("dcim/sites", 99, fallback_endpoint=None)
     assert result == {"deleted": True, "object_type": "dcim.site", "object_id": 99}
 
 
@@ -176,9 +197,7 @@ def test_delete_object_dry_run_returns_target_without_deleting(mock_netbox):
     """dry_run=True fetches the target and never calls delete (confirm irrelevant)."""
     mock_netbox.get.return_value = {"id": 99, "name": "doomed"}
 
-    result = netbox_delete_object(
-        object_type="dcim.site", object_id=99, dry_run=True
-    )
+    result = netbox_delete_object(object_type="dcim.site", object_id=99, dry_run=True)
 
     mock_netbox.get.assert_called_once_with("dcim/sites", id=99, fallback_endpoint=None)
     mock_netbox.delete.assert_not_called()

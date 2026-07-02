@@ -2,6 +2,35 @@
 
 <!-- version list -->
 
+## Fork: opt-in write tools
+
+### 2026-05-14
+
+- **feat(writes): opt-in `create_object`/`update_object`/`delete_object` tools**
+  behind `ENABLE_WRITES=true` (env var) or `--enable-writes` (CLI). Read-only
+  behavior remains the default and matches upstream — write tools are absent
+  from `tools/list` unless explicitly enabled.
+  - `delete_object` requires explicit `confirm=True`; all three write tools
+    support `dry_run=True` to preview without mutating.
+  - `fallback_endpoint` parity with the read path for pre-4.4 NetBox.
+  - `object_id` constrained to `>= 1` on write tools and `get_object_by_id`.
+  - Mutations logged at INFO by the tool layer in addition to NetBox's changelog.
+  - NetBox 4xx error bodies surfaced to the caller for self-correction.
+
+### 2026-07-02
+
+- **feat(writes): `dry_run` on `create_object`** for parity with update/delete —
+  validates and returns the intended payload without issuing the POST.
+- **feat(writes): startup write-permission preflight.** When writes are enabled,
+  the server probes the token via `OPTIONS` on a representative endpoint and
+  refuses to start if the `Allow` header indicates a read-only token. Network
+  failures are advisory (non-blocking).
+- **feat(observability): plugin-aware write warning.** When writes and plugin
+  discovery are both enabled, startup names how many plugin object types are on
+  the writable surface.
+- **docs:** recommend tight token scoping for write-enabled deployments; note
+  that plugin discovery + writes widens the writable surface.
+
 ## v1.1.0 (2026-04-20)
 
 ### Bug Fixes

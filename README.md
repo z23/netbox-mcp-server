@@ -25,11 +25,15 @@ The server is intentionally simple — easy to get started with, hard to misuse 
 
 | Tool | Description |
 |------|-------------|
-| create_object | Creates a NetBox object |
+| create_object | Creates a NetBox object. Supports `dry_run=True` to preview the intended payload before committing |
 | update_object | PATCH-updates a NetBox object. Supports `dry_run=True` to preview the diff before committing |
 | delete_object | Deletes a NetBox object. Requires `confirm=True`; supports `dry_run=True` to preview the target |
 
 > ⚠️ **Destructive operations**: `update_object` and `delete_object` modify NetBox state. The API token must have write permissions, and every mutation is logged at INFO level by this server and recorded in NetBox's changelog. `delete_object` requires an explicit `confirm=True` to guard against accidental calls.
+>
+> ⚠️ **Scope write tokens tightly.** When `ENABLE_WRITES=true`, the NetBox API token should be restricted to the specific object types and CRUD actions you intend the MCP to perform. The server can only mutate what the token permits — a token scoped to a handful of models with only the needed add/change/delete permissions is far safer than one with global write access. At startup the server probes the token (via `OPTIONS` on a representative endpoint) and refuses to start if it appears read-only.
+>
+> ⚠️ **Plugin discovery widens writes.** When `ENABLE_PLUGIN_DISCOVERY=true` *and* `ENABLE_WRITES=true`, every object type NetBox reports — including discovered plugin models — becomes writable. The startup log names how many plugin types are on the writable surface; audit those types before enabling both flags together.
 
 > Note: Core NetBox object types are always available. Plugin object types can be auto-discovered — see [Plugin Object Type Discovery](#plugin-object-type-discovery). Advanced features (GraphQL, dynamic model discovery, etc.) are deliberately out of scope — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full scope statement and rationale.
 

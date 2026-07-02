@@ -348,6 +348,40 @@ class NetBoxRestClient(NetBoxClientBase):
         response.raise_for_status()
         return response.status_code == 204
 
+    def verify_write_access(self) -> None:
+        """Confirm the token has write permissions via a non-mutating probe.
+
+        Issues an OPTIONS request against a representative writable endpoint
+        (dcim/sites, present on every NetBox install) and inspects the HTTP
+        ``Allow`` header that DRF populates with the methods permitted for
+        this token.
+
+        Raises:
+            PermissionError: If the Allow header is present but lists no
+                write methods (POST/PUT/PATCH/DELETE), indicating the token
+                is read-only.
+            httpx.HTTPStatusError: If the OPTIONS request itself fails
+                (e.g. 5xx, network error). Surfaced to the caller so it can
+                decide whether to treat a probe failure as fatal.
+
+        An absent or empty Allow header is treated as ambiguous and the call
+        returns without raising — the actual mutation may still succeed.
+        """
+        url = self._build_url("dcim/sites")
+        response = self.session.options(url)
+        response.raise_for_status()
+        allow = response.headers.get("Allow", "")
+        methods = {m.strip().upper() for m in allow.split(",") if m.strip()}
+        if not methods:
+            return  # ambiguous; don't block startup on an uninformative probe
+        write_methods = {"POST", "PUT", "PATCH", "DELETE"}
+        if not (methods & write_methods):
+            raise PermissionError(
+                "ENABLE_WRITES is set but the NetBox token appears read-only "
+                "(no write methods permitted on dcim/sites per the Allow header). "
+                "Grant write permissions to the token or unset ENABLE_WRITES."
+            )
+
     def bulk_create(self, endpoint: str, data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Create multiple objects in NetBox via the REST API.

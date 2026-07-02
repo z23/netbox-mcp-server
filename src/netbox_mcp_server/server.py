@@ -389,6 +389,7 @@ def _httpx_error_to_value_error(exc: httpx.HTTPStatusError) -> ValueError:
 def netbox_create_object(
     object_type: str,
     data: dict[str, Any],
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """
     Create a new object in NetBox.
@@ -398,9 +399,12 @@ def netbox_create_object(
         data: Field values for the new object. Required fields depend on the object type;
               consult NetBox API docs or call netbox_get_objects to see existing examples.
               Foreign keys generally accept either a numeric id or a natural slug.
+        dry_run: If True, validate the request and return the intended payload without
+                 sending the POST. Use this to preview a create before committing to it.
 
     Returns:
-        The created object as a dict (includes server-assigned id, url, created, etc.).
+        On a real call: the created object as a dict (includes server-assigned id, url, created, etc.).
+        On dry_run: {"dry_run": True, "object_type": ..., "endpoint": ..., "proposed": <data>}.
     """
     if object_type not in NETBOX_OBJECT_TYPES:
         valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
@@ -411,6 +415,16 @@ def netbox_create_object(
 
     logger = logging.getLogger(__name__)
     endpoint, fallback = _get_endpoint_info(object_type)
+
+    if dry_run:
+        logger.info(f"netbox_create_object[dry_run]: {object_type} fields={sorted(data.keys())}")
+        return {
+            "dry_run": True,
+            "object_type": object_type,
+            "endpoint": endpoint,
+            "proposed": data,
+        }
+
     logger.info(f"netbox_create_object: {object_type} fields={sorted(data.keys())}")
     try:
         result = netbox.create(endpoint, data, fallback_endpoint=fallback)
@@ -472,9 +486,7 @@ def netbox_update_object(
             "proposed": data,
         }
 
-    logger.info(
-        f"netbox_update_object: {object_type} id={object_id} fields={sorted(data.keys())}"
-    )
+    logger.info(f"netbox_update_object: {object_type} id={object_id} fields={sorted(data.keys())}")
     try:
         result = netbox.update(endpoint, object_id, data, fallback_endpoint=fallback)
     except httpx.HTTPStatusError as e:
@@ -513,9 +525,7 @@ def netbox_delete_object(
     endpoint, fallback = _get_endpoint_info(object_type)
 
     if dry_run:
-        logger.info(
-            f"netbox_delete_object[dry_run]: {object_type} id={object_id}"
-        )
+        logger.info(f"netbox_delete_object[dry_run]: {object_type} id={object_id}")
         try:
             target = netbox.get(endpoint, id=object_id, fallback_endpoint=fallback)
         except httpx.HTTPStatusError as e:
@@ -892,8 +902,10 @@ def main() -> None:
         logger.error(f"Failed to initialize NetBox client: {e}")
         sys.exit(1)
 
+    plugin_count = 0
     if settings.enable_plugin_discovery:
         plugin_types = discover_plugin_types(netbox)
+        plugin_count = len(plugin_types)
         if plugin_types:
             NETBOX_OBJECT_TYPES.update(plugin_types)
             asyncio.run(_update_tool_descriptions())
@@ -904,11 +916,30 @@ def main() -> None:
             bind = f"http://{settings.host}:{settings.port}"
         else:
             bind = "stdio"
+        writable_count = len(NETBOX_OBJECT_TYPES)
         logger.warning(
-            f"Write tools ENABLED ({bind}). NetBox API token must have write "
-            "permissions; all mutations are recorded in NetBox's changelog. "
-            "Verify the bind address is not exposed to untrusted networks."
+            f"Write tools ENABLED ({bind}). {writable_count} object type(s) are "
+            f"writable (core NetBox types plus any discovered plugins). The "
+            "NetBox API token must have write permissions; all mutations are "
+            "recorded in NetBox's changelog. Verify the bind address is not "
+            "exposed to untrusted networks."
         )
+        if plugin_count > 0:
+            logger.warning(
+                f"Write tools are enabled AND plugin discovery added "
+                f"{plugin_count} plugin object type(s) to the writable surface. "
+                "Confirm these are intended to be mutable."
+            )
+
+        # Preflight: fail fast on the common misconfig of a read-only token.
+        try:
+            netbox.verify_write_access()
+        except PermissionError as e:
+            logger.error(f"Write-tool preflight failed: {e}")
+            sys.exit(1)
+        except Exception as e:
+            # Probe failed for network/HTTP reasons — advisory, non-blocking.
+            logger.warning(f"Could not verify token write permissions at startup (continuing): {e}")
 
     try:
         if settings.transport == "stdio":
