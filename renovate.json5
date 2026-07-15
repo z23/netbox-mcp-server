@@ -1,7 +1,11 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-  extends: ['config:recommended', ':dependencyDashboard', ':semanticCommits'],
-
+  extends: [
+    'github>netboxlabs/renovate',
+    'config:recommended',
+    ':dependencyDashboard',
+    ':semanticCommits',
+  ],
   // Schedule inherited from central config.js (before 4am UTC on weekdays)
 
   labels: ['dependencies'],
@@ -23,7 +27,6 @@
       matchManagers: ['pep621', 'uv'],
       matchUpdateTypes: ['minor', 'patch'],
       groupName: 'non-major Python dependencies',
-      minimumReleaseAge: '3 days',
     },
 
     // GitHub Actions
@@ -33,7 +36,6 @@
       pinDigests: true,
       matchUpdateTypes: ['minor', 'patch', 'pin', 'digest'],
       groupName: 'non-major GitHub Actions',
-      minimumReleaseAge: '3 days',
     },
 
     // Docker
@@ -42,7 +44,6 @@
       matchManagers: ['dockerfile'],
       matchUpdateTypes: ['minor', 'patch', 'pin', 'digest'],
       groupName: 'non-major Docker dependencies',
-      minimumReleaseAge: '3 days',
     },
 
     // Major updates always separate for manual review

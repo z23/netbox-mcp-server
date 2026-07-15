@@ -2,6 +2,153 @@
 
 <!-- version list -->
 
+## v1.2.1 (2026-06-17)
+
+### Bug Fixes
+
+- **deps**: Bump cryptography, pyjwt, python-multipart for security advisories
+  ([#161](https://github.com/netboxlabs/netbox-mcp-server/pull/161),
+  [`238f423`](https://github.com/netboxlabs/netbox-mcp-server/commit/238f42338977123d9cb90afc9121f9b36b368799))
+
+- **deps**: Update non-major python dependencies
+  ([#150](https://github.com/netboxlabs/netbox-mcp-server/pull/150),
+  [`8b5fd4b`](https://github.com/netboxlabs/netbox-mcp-server/commit/8b5fd4b05d55b7b13c0eb8f73e9e404faed97971))
+
+- **deps**: Update non-major python dependencies
+  ([#135](https://github.com/netboxlabs/netbox-mcp-server/pull/135),
+  [`6d4c13b`](https://github.com/netboxlabs/netbox-mcp-server/commit/6d4c13b2decb7311a43a8daeb305d8f15c3b6fcd))
+
+- **transport**: Add optional bearer token authentication for HTTP transport
+  ([#162](https://github.com/netboxlabs/netbox-mcp-server/pull/162),
+  [`17df465`](https://github.com/netboxlabs/netbox-mcp-server/commit/17df4653ba7be44d3e7b6650e7f9fdf54b860520))
+
+### Chores
+
+- **deps**: Bump gitpython to 3.1.50 and pygments to 2.20.0
+  ([`3d08421`](https://github.com/netboxlabs/netbox-mcp-server/commit/3d084213bf5cbcf1bd4259fe4f2c1ef59b49ecad))
+
+- **deps**: Update non-major docker dependencies
+  ([#160](https://github.com/netboxlabs/netbox-mcp-server/pull/160),
+  [`9a0316f`](https://github.com/netboxlabs/netbox-mcp-server/commit/9a0316f6a3c334413843569f40f1e82bd3aad65c))
+
+- **deps**: Update non-major github actions
+  ([#158](https://github.com/netboxlabs/netbox-mcp-server/pull/158),
+  [`6658b92`](https://github.com/netboxlabs/netbox-mcp-server/commit/6658b9263b0e48cdd391414f5fc77412bac62f95))
+
+- **deps**: Update sigstore/cosign-installer action to v4
+  ([#141](https://github.com/netboxlabs/netbox-mcp-server/pull/141),
+  [`1a6bfd6`](https://github.com/netboxlabs/netbox-mcp-server/commit/1a6bfd688c66b28ab54746c776b3e8ff3a1c4cfc))
+
+- **renovate**: Add top-level minimumReleaseAge for full coverage
+  ([#156](https://github.com/netboxlabs/netbox-mcp-server/pull/156),
+  [`a06a2e4`](https://github.com/netboxlabs/netbox-mcp-server/commit/a06a2e49e8d65131fe883e7e60ebd35eef691d24))
+
+- **renovate**: Extend the central org preset
+  ([#157](https://github.com/netboxlabs/netbox-mcp-server/pull/157),
+  [`9638a48`](https://github.com/netboxlabs/netbox-mcp-server/commit/9638a487c22db555e65c706dc8f4f127b0c9cf07))
+
+- **renovate**: Raise stability window to 7-day org standard
+  ([#154](https://github.com/netboxlabs/netbox-mcp-server/pull/154),
+  [`3adb98c`](https://github.com/netboxlabs/netbox-mcp-server/commit/3adb98cc65fd9b7cabb2a686010906a60f6b16b8))
+
+### Documentation
+
+- Add Community section and remove em dashes
+  ([#149](https://github.com/netboxlabs/netbox-mcp-server/pull/149),
+  [`6c97e7e`](https://github.com/netboxlabs/netbox-mcp-server/commit/6c97e7e779d56a75931a17c915a6aeff24f9fa92))
+
+
+## v1.2.0 (2026-05-26)
+
+### Bug Fixes
+
+- Reject __in lookups, suggest list-as-value form
+  ([#144](https://github.com/netboxlabs/netbox-mcp-server/pull/144),
+  [`7900563`](https://github.com/netboxlabs/netbox-mcp-server/commit/79005630ebf718c4c922212d7dfa9dcd940a920a))
+
+- **ci**: Extract full release notes from CHANGELOG
+  ([#118](https://github.com/netboxlabs/netbox-mcp-server/pull/118),
+  [`d5b3657`](https://github.com/netboxlabs/netbox-mcp-server/commit/d5b365760153487fd342387e749948765a98153b))
+
+- **ci**: Regenerate uv.lock in release PR workflow
+  ([#118](https://github.com/netboxlabs/netbox-mcp-server/pull/118),
+  [`d5b3657`](https://github.com/netboxlabs/netbox-mcp-server/commit/d5b365760153487fd342387e749948765a98153b))
+
+- **deps**: Update non-major python dependencies
+  ([`2bd86b2`](https://github.com/netboxlabs/netbox-mcp-server/commit/2bd86b2a8d04867ed7c1dda51e57f2f6c3fea6eb))
+
+- **filters**: Reject relationship id list lookups
+  ([#144](https://github.com/netboxlabs/netbox-mcp-server/pull/144),
+  [`7900563`](https://github.com/netboxlabs/netbox-mcp-server/commit/79005630ebf718c4c922212d7dfa9dcd940a920a))
+
+### Chores
+
+- Regenerate uv.lock for v1.1.0 version bump
+  ([#118](https://github.com/netboxlabs/netbox-mcp-server/pull/118),
+  [`d5b3657`](https://github.com/netboxlabs/netbox-mcp-server/commit/d5b365760153487fd342387e749948765a98153b))
+
+- **ci**: Sign and attest published images, pin base by digest
+  ([#134](https://github.com/netboxlabs/netbox-mcp-server/pull/134),
+  [`17f4866`](https://github.com/netboxlabs/netbox-mcp-server/commit/17f48661230c14706418cd9e8b160f6252f4e6c6))
+
+- **deps**: Bump the uv group across 1 directory with 2 updates
+  ([#146](https://github.com/netboxlabs/netbox-mcp-server/pull/146),
+  [`c7838cc`](https://github.com/netboxlabs/netbox-mcp-server/commit/c7838ccccb43312d77b8be78ba9284be37c0309c))
+
+- **deps**: Bump the uv group across 1 directory with 5 updates
+  ([#133](https://github.com/netboxlabs/netbox-mcp-server/pull/133),
+  [`613395c`](https://github.com/netboxlabs/netbox-mcp-server/commit/613395cc509183feb97541ecceddacc3b9f4f87d))
+
+- **deps**: Bump urllib3 in the uv group across 1 directory
+  ([#140](https://github.com/netboxlabs/netbox-mcp-server/pull/140),
+  [`c1912eb`](https://github.com/netboxlabs/netbox-mcp-server/commit/c1912ebbf9bec5c94f23d53d57d2e14218b1a043))
+
+- **deps**: Update actions/attest-build-provenance action to v4
+  ([#139](https://github.com/netboxlabs/netbox-mcp-server/pull/139),
+  [`335cad8`](https://github.com/netboxlabs/netbox-mcp-server/commit/335cad855a35494789f27d092990c196ef85e189))
+
+- **deps**: Update actions/github-script action to v9
+  ([#111](https://github.com/netboxlabs/netbox-mcp-server/pull/111),
+  [`a65bbca`](https://github.com/netboxlabs/netbox-mcp-server/commit/a65bbca2508a72df332520c7ab79d1fe3c5d23bc))
+
+- **deps**: Update dependency pytest to v9.0.3 [security]
+  ([`efb955d`](https://github.com/netboxlabs/netbox-mcp-server/commit/efb955d53cbcf449a9855dceca0077efa0ca1bdd))
+
+- **deps**: Update github/codeql-action action to v4.35.3
+  ([`5d728c6`](https://github.com/netboxlabs/netbox-mcp-server/commit/5d728c625d6532805b3ea16d54e330b7e26baec3))
+
+- **deps**: Update non-major github actions
+  ([#138](https://github.com/netboxlabs/netbox-mcp-server/pull/138),
+  [`8f80b9d`](https://github.com/netboxlabs/netbox-mcp-server/commit/8f80b9dd2f2fda4d977cbbb209cbbc818fc833b5))
+
+- **deps**: Update python:3.14-alpine3.23 docker digest to 5a824eb
+  ([#142](https://github.com/netboxlabs/netbox-mcp-server/pull/142),
+  [`8f8c25c`](https://github.com/netboxlabs/netbox-mcp-server/commit/8f8c25c8e6f12e2c2e827a5d9cc51b77e5aae918))
+
+### Continuous Integration
+
+- Publish images to Docker Hub instead of GHCR
+  ([`ea7b264`](https://github.com/netboxlabs/netbox-mcp-server/commit/ea7b26439c124c746257863c3cfb4e7198bab733))
+
+- Skip floating tags for pre-release versions
+  ([`6a86784`](https://github.com/netboxlabs/netbox-mcp-server/commit/6a86784c85a0c114c1c5dad591c5990c07bccb19))
+
+### Documentation
+
+- Add CONTRIBUTING.md and clarify project scope
+  ([#128](https://github.com/netboxlabs/netbox-mcp-server/pull/128),
+  [`d22280b`](https://github.com/netboxlabs/netbox-mcp-server/commit/d22280b5bd16121cbd583d96bc89a59c25570eec))
+
+- Clarify NetBox lookup filter support
+  ([#144](https://github.com/netboxlabs/netbox-mcp-server/pull/144),
+  [`7900563`](https://github.com/netboxlabs/netbox-mcp-server/commit/79005630ebf718c4c922212d7dfa9dcd940a920a))
+
+### Features
+
+- Add CORS_ORIGINS setting ([#137](https://github.com/netboxlabs/netbox-mcp-server/pull/137),
+  [`1df7f4d`](https://github.com/netboxlabs/netbox-mcp-server/commit/1df7f4df82aac0b5271cc7c4c34e69b10c40c992))
+
+
 ## v1.1.0 (2026-04-20)
 
 ### Bug Fixes

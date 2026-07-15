@@ -11,7 +11,11 @@
 
 This is a [Model Context Protocol](https://modelcontextprotocol.io/) server for NetBox. It enables you to interact with your data in NetBox directly via LLMs that support MCP. Read-only by default; opt in to write tools (create/update/delete) via `ENABLE_WRITES=true`.
 
-The server is intentionally simple — easy to get started with, hard to misuse (read-only by default, no plugin surface), and easy to fork and adapt. Forking under Apache 2.0 is a first-class path for users who need capabilities beyond the project's scope.
+The server is intentionally simple: easy to get started with, hard to misuse (read-only by default, no plugin surface), and easy to fork and adapt. Forking under Apache 2.0 is a first-class path for users who need capabilities beyond the project's scope.
+
+## Community
+
+For chat, use cases, and general MCP discussion, join the NetBox community at [netdev.chat](https://netdev.chat). The **#ai** channel is the right home for MCP integrations, questions, and sharing use cases. Bugs and feature ideas specific to this server go in [issues](https://github.com/netboxlabs/netbox-mcp-server/issues).
 
 ## Tools
 
@@ -31,7 +35,7 @@ The server is intentionally simple — easy to get started with, hard to misuse 
 
 > ⚠️ **Destructive operations**: `update_object` and `delete_object` modify NetBox state. The API token must have write permissions, and every mutation is logged at INFO level by this server and recorded in NetBox's changelog. `delete_object` requires an explicit `confirm=True` to guard against accidental calls.
 
-> Note: Core NetBox object types are always available. Plugin object types can be auto-discovered — see [Plugin Object Type Discovery](#plugin-object-type-discovery). Advanced features (GraphQL, dynamic model discovery, etc.) are deliberately out of scope — see [CONTRIBUTING.md](CONTRIBUTING.md) for the full scope statement and rationale.
+> Note: Core NetBox object types are always available. Plugin object types can be auto-discovered. See [Plugin Object Type Discovery](#plugin-object-type-discovery). Advanced features (GraphQL, dynamic model discovery, etc.) are deliberately out of scope. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full scope statement and rationale.
 
 ## Usage
 
@@ -183,6 +187,7 @@ The server supports multiple configuration sources with the following precedence
 | `TRANSPORT` | `stdio` \| `http` | `stdio` | No | MCP transport protocol |
 | `HOST` | String | `127.0.0.1` | If HTTP | Host address for HTTP server |
 | `PORT` | Integer | `8000` | If HTTP | Port for HTTP server |
+| `MCP_AUTH_TOKEN` | String | - | No | Bearer token required on the HTTP endpoint. When unset, the HTTP transport is unauthenticated. Clients send `Authorization: Bearer <token>`. |
 | `VERIFY_SSL` | Boolean | `true` | No | Whether to verify SSL certificates |
 | `ENABLE_PLUGIN_DISCOVERY` | Boolean | `false` | No | Auto-discover plugin object types at startup |
 | `ENABLE_WRITES` | Boolean | `false` | No | Register `create_object`/`update_object`/`delete_object` tools. Token must have write permissions in NetBox. |
@@ -247,6 +252,8 @@ TRANSPORT=stdio
 # HTTP Transport Settings (only used if TRANSPORT=http)
 # HOST=127.0.0.1
 # PORT=8000
+# Bearer token required on the HTTP endpoint. When unset, the endpoint is unauthenticated.
+# MCP_AUTH_TOKEN=a-strong-random-token
 
 # Security (optional, defaults to true)
 VERIFY_SSL=true
@@ -312,11 +319,14 @@ docker run --rm \
   -e TRANSPORT=http \
   -e HOST=0.0.0.0 \
   -e PORT=8000 \
+  -e MCP_AUTH_TOKEN=<a-strong-random-token> \
   -p 8000:8000 \
   netbox-mcp-server:latest
 ```
 
 > **Note:** Docker containers require `TRANSPORT=http` since stdio transport doesn't work in containerized environments.
+
+> **⚠️ Security:** The HTTP transport has **no authentication** unless you set `MCP_AUTH_TOKEN`. Binding to `HOST=0.0.0.0` exposes read access to all NetBox data your token can see to anyone who can reach the port. Set a strong `MCP_AUTH_TOKEN` (clients then send `Authorization: Bearer <token>`) and terminate TLS at a reverse proxy or gateway before exposing the server to a network. A bearer token sent over plain HTTP can be intercepted, so TLS is required for real deployments.
 
 **Connecting to NetBox on your host machine:**
 
@@ -330,6 +340,7 @@ docker run --rm \
   -e TRANSPORT=http \
   -e HOST=0.0.0.0 \
   -e PORT=8000 \
+  -e MCP_AUTH_TOKEN=<a-strong-random-token> \
   -p 8000:8000 \
   netbox-mcp-server:latest
 ```
@@ -344,6 +355,7 @@ docker run --rm \
   -e NETBOX_TOKEN=<your-api-token> \
   -e TRANSPORT=http \
   -e HOST=0.0.0.0 \
+  -e MCP_AUTH_TOKEN=<a-strong-random-token> \
   -e LOG_LEVEL=DEBUG \
   -e VERIFY_SSL=false \
   -p 8000:8000 \
@@ -401,7 +413,7 @@ If discovery fails for any reason (network error, insufficient permissions, unsu
 
 ## Development
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing new features — we encourage filing an issue for discussion first to confirm scope fit.
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing new features. We encourage filing an issue for discussion first to confirm scope fit.
 
 If your use case needs capabilities outside this project's scope, forking under Apache 2.0 is an actively supported path.
 
