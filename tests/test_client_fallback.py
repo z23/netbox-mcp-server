@@ -371,11 +371,14 @@ def test_delete_falls_back_on_404(client):
     with patch.object(client.session, "delete") as mock_delete:
         mock_delete.side_effect = [primary, fallback]
 
-        assert client.delete(
-            "vpn/tunnels",
-            1,
-            fallback_endpoint="plugins/vpn/tunnels",
-        ) is True
+        assert (
+            client.delete(
+                "vpn/tunnels",
+                1,
+                fallback_endpoint="plugins/vpn/tunnels",
+            )
+            is True
+        )
         assert mock_delete.call_count == 2
 
 

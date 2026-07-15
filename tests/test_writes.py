@@ -11,7 +11,6 @@ from netbox_mcp_server.server import (
     netbox_update_object,
 )
 
-
 # ============================================================================
 # Create
 # ============================================================================
@@ -137,13 +136,9 @@ def test_update_object_dry_run_returns_diff_without_patch(mock_netbox):
 def test_delete_object_happy_path(mock_netbox):
     mock_netbox.delete.return_value = True
 
-    result = netbox_delete_object(
-        object_type="dcim.site", object_id=99, confirm=True
-    )
+    result = netbox_delete_object(object_type="dcim.site", object_id=99, confirm=True)
 
-    mock_netbox.delete.assert_called_once_with(
-        "dcim/sites", 99, fallback_endpoint=None
-    )
+    mock_netbox.delete.assert_called_once_with("dcim/sites", 99, fallback_endpoint=None)
     assert result == {"deleted": True, "object_type": "dcim.site", "object_id": 99}
 
 
@@ -176,9 +171,7 @@ def test_delete_object_dry_run_returns_target_without_deleting(mock_netbox):
     """dry_run=True fetches the target and never calls delete (confirm irrelevant)."""
     mock_netbox.get.return_value = {"id": 99, "name": "doomed"}
 
-    result = netbox_delete_object(
-        object_type="dcim.site", object_id=99, dry_run=True
-    )
+    result = netbox_delete_object(object_type="dcim.site", object_id=99, dry_run=True)
 
     mock_netbox.get.assert_called_once_with("dcim/sites", id=99, fallback_endpoint=None)
     mock_netbox.delete.assert_not_called()

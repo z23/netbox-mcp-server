@@ -1,12 +1,17 @@
 import argparse
 import asyncio
+import hashlib
+import hmac
 import logging
 import sys
 from typing import Annotated, Any
 
 import httpx
 from fastmcp import FastMCP
-from pydantic import Field
+from fastmcp.server.auth import AccessToken, TokenVerifier
+from pydantic import Field, SecretStr
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 
 from netbox_mcp_server.config import Settings, configure_logging
 from netbox_mcp_server.netbox_client import NetBoxRestClient
@@ -53,6 +58,19 @@ def parse_cli_args() -> dict[str, Any]:
         "--port",
         type=int,
         help="Port for HTTP server (default: 8000)",
+    )
+    parser.add_argument(
+        "--cors-origins",
+        action="append",
+        help="CORS origins (repeat flag). Use * to allow any origin (default: none)",
+    )
+    parser.add_argument(
+        "--mcp-auth-token",
+        type=str,
+        help=(
+            "Bearer token required on the HTTP transport endpoint "
+            "(prefer the MCP_AUTH_TOKEN env var; default: none)"
+        ),
     )
 
     # Security settings
@@ -110,6 +128,10 @@ def parse_cli_args() -> dict[str, Any]:
         overlay["host"] = args.host
     if args.port is not None:
         overlay["port"] = args.port
+    if args.cors_origins is not None:
+        overlay["cors_origins"] = args.cors_origins
+    if args.mcp_auth_token is not None:
+        overlay["mcp_auth_token"] = args.mcp_auth_token
     if args.verify_ssl is not None:
         overlay["verify_ssl"] = args.verify_ssl
     if args.enable_plugin_discovery is not None:
@@ -120,6 +142,52 @@ def parse_cli_args() -> dict[str, Any]:
         overlay["log_level"] = args.log_level
 
     return overlay
+
+
+class BearerTokenVerifier(TokenVerifier):
+    """Constant-time single-secret bearer check for the HTTP transport.
+
+    This is a FastMCP Resource Server verifier: it only validates an incoming
+    'Authorization: Bearer <token>' against one configured secret and issues no
+    tokens itself. FastMCP mounts its own auth middleware around this, returning
+    401 (+ WWW-Authenticate) for unauthenticated requests to the MCP endpoint.
+    """
+
+    def __init__(self, secret: str) -> None:
+        super().__init__()
+        # Digest, not raw secret: lets verify_token compare in constant time.
+        self._secret_digest = hashlib.sha256(secret.encode("utf-8")).digest()
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        """Return an AccessToken for a matching bearer, or None to reject."""
+        if not token:
+            return None
+        # Hash both sides: compare_digest raises TypeError on a non-ASCII str, and
+        # the bearer is attacker-controlled (header bytes decode as latin-1).
+        token_digest = hashlib.sha256(token.encode("utf-8", "surrogatepass")).digest()
+        if not hmac.compare_digest(token_digest, self._secret_digest):
+            return None
+        return AccessToken(token=token, client_id="netbox-mcp-server", scopes=[])
+
+
+def build_http_auth(token: SecretStr | None) -> TokenVerifier | None:
+    """
+    Build the HTTP transport auth provider from an optional bearer token.
+
+    Returns a verifier that makes FastMCP reject unauthenticated requests to the
+    MCP endpoint with 401, or None when no token is configured. Empty or
+    whitespace-only values are normalized to None upstream in Settings, so a
+    non-None token here is always a real secret.
+
+    Args:
+        token: Optional bearer token to require on the HTTP transport endpoint
+
+    Returns:
+        A TokenVerifier requiring the token, or None when no token is set
+    """
+    if token is None:
+        return None
+    return BearerTokenVerifier(token.get_secret_value())
 
 
 # Default object types for global search
@@ -140,21 +208,24 @@ netbox = None
 
 def validate_filters(filters: dict) -> None:
     """
-    Validate that filters don't use multi-hop relationship traversal.
+    Validate that filters don't use unsupported lookup suffixes or multi-hop
+    relationship traversal.
 
-    NetBox API does not support nested relationship queries like:
-    - device__site_id (filtering by related object's field)
-    - interface__device__site (multiple relationship hops)
+    NetBox API does not support:
+    - __in suffix (pass a list as the field value instead: {'id': [1, 2, 3]})
+    - nested relationship queries like device__site_id or interface__device__site
 
     Valid patterns:
     - Direct field filters: site_id, name, status
-    - Lookup expressions: name__ic, status__in, id__gt
+    - List values for multi-value filters: {'site_id': [1, 2]}
+    - Lookup expressions supported by the target NetBox field: name__ic, id__gt
 
     Args:
         filters: Dictionary of filter parameters
 
     Raises:
-        ValueError: If filter uses invalid multi-hop relationship traversal
+        ValueError: If filter uses an unsupported lookup suffix or multi-hop
+                    relationship traversal
     """
     valid_suffixes = {
         "n",
@@ -173,7 +244,6 @@ def validate_filters(filters: dict) -> None:
         "lte",
         "gt",
         "gte",
-        "in",
     }
 
     for filter_name in filters:
@@ -185,6 +255,14 @@ def validate_filters(filters: dict) -> None:
             continue
 
         parts = filter_name.split("__")
+
+        if len(parts) == 2 and parts[-1] == "in":
+            base = parts[0]
+            raise ValueError(
+                f"Invalid filter '{filter_name}': '__in' lookup suffix is not "
+                "supported and may be silently ignored by NetBox. "
+                f"Pass a list to the field directly instead: {{'{base}': [1, 2, 3]}}"
+            )
 
         # Allow field__suffix pattern (e.g., name__ic, id__gt)
         if len(parts) == 2 and parts[-1] in valid_suffixes:
@@ -208,11 +286,15 @@ def validate_filters(filters: dict) -> None:
 
                 FILTER RULES:
                 Valid: Direct fields like {'site_id': 1, 'name': 'router', 'status': 'active'}
-                Valid: Lookups like {'name__ic': 'switch', 'id__in': [1,2,3], 'vid__gte': 100}
+                Valid: Field-supported lookups like {'name__ic': 'switch', 'vid__gte': 100}
                 Invalid: Multi-hop like {'device__site_id': 1} - NOT supported
 
                 Lookup suffixes: n, ic, nic, isw, nisw, iew, niew, ie, nie,
-                                 empty, regex, iregex, lt, lte, gt, gte, in
+                                 empty, regex, iregex, lt, lte, gt, gte
+                Lookup support is field-specific. NetBox may silently ignore unsupported
+                lookups and return overly broad results. The '__in' suffix is not supported
+                and is rejected by this tool. For multiple values, pass a list as the field
+                value directly: {'vminterface_id': [621493, 631527]} or {'id': [1, 2, 3]}.
 
                 Two-step pattern for cross-relationship queries:
                   sites = netbox_get_objects('dcim.site', {'name': 'NYC'})
@@ -472,9 +554,7 @@ def netbox_update_object(
             "proposed": data,
         }
 
-    logger.info(
-        f"netbox_update_object: {object_type} id={object_id} fields={sorted(data.keys())}"
-    )
+    logger.info(f"netbox_update_object: {object_type} id={object_id} fields={sorted(data.keys())}")
     try:
         result = netbox.update(endpoint, object_id, data, fallback_endpoint=fallback)
     except httpx.HTTPStatusError as e:
@@ -513,9 +593,7 @@ def netbox_delete_object(
     endpoint, fallback = _get_endpoint_info(object_type)
 
     if dry_run:
-        logger.info(
-            f"netbox_delete_object[dry_run]: {object_type} id={object_id}"
-        )
+        logger.info(f"netbox_delete_object[dry_run]: {object_type} id={object_id}")
         try:
             target = netbox.get(endpoint, id=object_id, fallback_endpoint=fallback)
         except httpx.HTTPStatusError as e:
@@ -916,7 +994,32 @@ def main() -> None:
             mcp.run(transport="stdio")
         elif settings.transport == "http":
             logger.info(f"Starting HTTP transport on {settings.host}:{settings.port}")
-            mcp.run(transport="http", host=settings.host, port=settings.port)
+            auth = build_http_auth(settings.mcp_auth_token)
+            if auth is not None:
+                # FastMCP reads mcp.auth when it builds the HTTP app at run time,
+                # so this assignment wires it (the 401 tests verify enforcement).
+                mcp.auth = auth
+                logger.info("HTTP transport authentication enabled (bearer token required)")
+            else:
+                logger.warning(
+                    "HTTP transport is running without authentication. Set "
+                    "MCP_AUTH_TOKEN, or place the server behind an authenticating "
+                    "TLS reverse proxy or gateway before exposing it to a network."
+                )
+            middleware = [
+                Middleware(
+                    CORSMiddleware,
+                    allow_origins=settings.cors_origins,
+                    allow_methods=["GET", "POST", "OPTIONS"],
+                    allow_headers=[
+                        "Authorization",
+                        "mcp-protocol-version",
+                        "mcp-session-id",
+                    ],
+                    expose_headers=["mcp-session-id"],
+                )
+            ]
+            mcp.run(transport="http", host=settings.host, port=settings.port, middleware=middleware)
     except Exception as e:
         logger.error(f"Failed to start MCP server: {e}")
         sys.exit(1)

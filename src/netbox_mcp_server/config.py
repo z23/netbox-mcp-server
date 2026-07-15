@@ -3,8 +3,9 @@
 import logging
 import logging.config
 from typing import Any, Literal
+from urllib.parse import urlparse
 
-from pydantic import AnyUrl, SecretStr, field_validator, model_validator
+from pydantic import AnyUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +34,21 @@ class Settings(BaseSettings):
 
     port: int = 8000
     """Port to bind HTTP server (only used when transport='http')"""
+
+    cors_origins: list[str] = Field(
+        default_factory=list,
+        description="Browser origins allowed for HTTP CORS. Use * to allow any origin.",
+    )
+
+    mcp_auth_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Optional bearer token required on the HTTP transport endpoint. "
+            "When set, requests to the MCP endpoint must send "
+            "'Authorization: Bearer <token>'. Only applied when transport='http'."
+        ),
+    )
+    """Optional bearer token protecting the HTTP transport endpoint (treated as secret)"""
 
     # ===== Plugin Discovery Settings =====
     enable_plugin_discovery: bool = False
@@ -69,6 +85,20 @@ class Settings(BaseSettings):
             raise ValueError(f"Port must be between 1 and 65535, got {v}")
         return v
 
+    @field_validator("mcp_auth_token", mode="after")
+    @classmethod
+    def normalize_auth_token(cls, v: SecretStr | None) -> SecretStr | None:
+        """Treat an empty or whitespace-only token as unset.
+
+        A present-but-empty value (e.g. an unpopulated container secret
+        rendering as MCP_AUTH_TOKEN=) would otherwise build a verifier that
+        accepts an empty bearer while the server logs that auth is enabled.
+        Normalizing to None here keeps every consumer in agreement.
+        """
+        if v is not None and not v.get_secret_value().strip():
+            return None
+        return v
+
     @field_validator("netbox_url")
     @classmethod
     def validate_netbox_url(cls, v: AnyUrl) -> AnyUrl:
@@ -84,6 +114,20 @@ class Settings(BaseSettings):
         """No additional validation needed for HTTP transport; defaults are appropriate."""
         return self
 
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def validate_cors_origins(cls, v: object) -> list[str]:
+        """Ensure each CORS origin is a valid URL."""
+        for origin in v:
+            if origin == "*":
+                continue
+            parsed = urlparse(origin)
+            if not parsed.scheme or not parsed.netloc:
+                raise ValueError(
+                    f"Invalid CORS_ORIGIN: {origin!r} (expected format: http://host:port)"
+                )
+        return v
+
     def get_effective_config_summary(self) -> dict:
         """
         Return a non-secret summary of effective configuration for logging.
@@ -91,17 +135,25 @@ class Settings(BaseSettings):
         Returns:
             Dictionary with configuration values (secrets masked)
         """
-        return {
+        summary: dict[str, Any] = {
             "netbox_url": str(self.netbox_url),
             "netbox_token": "***REDACTED***",
             "transport": self.transport,
-            "host": self.host if self.transport == "http" else "N/A",
-            "port": self.port if self.transport == "http" else "N/A",
             "verify_ssl": self.verify_ssl,
             "enable_plugin_discovery": self.enable_plugin_discovery,
             "enable_writes": self.enable_writes,
             "log_level": self.log_level,
         }
+        if self.transport == "http":
+            summary.update(
+                {
+                    "host": self.host,
+                    "port": self.port,
+                    "cors_origins": self.cors_origins,
+                    "mcp_auth_token": "***REDACTED***" if self.mcp_auth_token else None,
+                }
+            )
+        return summary
 
 
 def configure_logging(
