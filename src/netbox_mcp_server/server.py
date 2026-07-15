@@ -554,9 +554,7 @@ def netbox_update_object(
             "proposed": data,
         }
 
-    logger.info(
-        f"netbox_update_object: {object_type} id={object_id} fields={sorted(data.keys())}"
-    )
+    logger.info(f"netbox_update_object: {object_type} id={object_id} fields={sorted(data.keys())}")
     try:
         result = netbox.update(endpoint, object_id, data, fallback_endpoint=fallback)
     except httpx.HTTPStatusError as e:
@@ -595,9 +593,7 @@ def netbox_delete_object(
     endpoint, fallback = _get_endpoint_info(object_type)
 
     if dry_run:
-        logger.info(
-            f"netbox_delete_object[dry_run]: {object_type} id={object_id}"
-        )
+        logger.info(f"netbox_delete_object[dry_run]: {object_type} id={object_id}")
         try:
             target = netbox.get(endpoint, id=object_id, fallback_endpoint=fallback)
         except httpx.HTTPStatusError as e:
