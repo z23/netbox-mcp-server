@@ -16,7 +16,8 @@ jobs:
       security-events: write
     env:
       TRIVY_DISABLE_VEX_NOTICE: "true"
-      IMAGE_REF: docker.io/netboxlabs/netbox-mcp-server:latest
+      # Scan this fork's published image (override with DOCKERHUB_IMAGE_NAME repo variable).
+      IMAGE_REF: docker.io/${{ vars.DOCKERHUB_IMAGE_NAME || github.repository }}:latest
 
     steps:
       - name: Pull image

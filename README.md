@@ -15,7 +15,7 @@ The server is intentionally simple: easy to get started with, hard to misuse (re
 
 ## Community
 
-For chat, use cases, and general MCP discussion, join the NetBox community at [netdev.chat](https://netdev.chat). The **#ai** channel is the right home for MCP integrations, questions, and sharing use cases. Bugs and feature ideas specific to this server go in [issues](https://github.com/netboxlabs/netbox-mcp-server/issues).
+For chat, use cases, and general MCP discussion, join the NetBox community at [netdev.chat](https://netdev.chat). The **#ai** channel is the right home for MCP integrations, questions, and sharing use cases. Bugs and feature ideas for **this fork** go in [issues](https://github.com/z23/netbox-mcp-server/issues). Issues that also apply to upstream may be reported at [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server/issues).
 
 ## Tools
 

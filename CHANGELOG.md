@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## Fork notes (z23/netbox-mcp-server)
+
+This repository is a fork of [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server).
+Entries below that link to `netboxlabs/...` are from upstream history.
+
+**Fork-specific changes** (not yet cut as a separate semver release tag on this fork):
+
+- Opt-in write tools (`ENABLE_WRITES=true`): `create_object` / `update_object` / `delete_object`
+- Production hardening for writes and HTTP transport (`WRITE_DENIED_TYPES`, refuse unauthenticated HTTP writes, changelog caps, search resilience, `NETBOX_TIMEOUT`)
+
+See the [README fork notice](README.md) and [releases](https://github.com/z23/netbox-mcp-server/releases) for this fork.
+
+
 ## v1.2.1 (2026-06-17)
 
 ### Bug Fixes

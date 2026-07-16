@@ -10,7 +10,8 @@ permissions:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: netboxlabs/netbox-mcp-server
+  # Defaults to this repository (e.g. z23/netbox-mcp-server). Override via repo variable if needed.
+  IMAGE_NAME: ${{ vars.DOCKERHUB_IMAGE_NAME || github.repository }}
 
 jobs:
   build:
@@ -24,9 +25,9 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: blacksmith-2vcpu-ubuntu-2404
+            runner: ubuntu-latest
           - platform: linux/arm64
-            runner: blacksmith-2vcpu-ubuntu-2404-arm
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

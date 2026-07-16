@@ -6,10 +6,10 @@ Questions that don't need a code change are best asked in the `#ai` channel on [
 
 ## Project scope
 
-The NetBox MCP Server is a **simple, read-only MCP server for core NetBox objects**. It uses the NetBox REST API with static token authentication. The priorities are:
+This repository is a **fork** of [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server) with opt-in write tools. Upstream remains a **simple, read-only MCP server for core NetBox objects**; this fork extends that with `ENABLE_WRITES` (still off by default). It uses the NetBox REST API with static token authentication. The priorities are:
 
 - **Easy to get started.** Minimal configuration, minimal dependencies, runs locally in under a minute.
-- **Hard to misuse.** Read-only by design, no plugin surface, small attack surface.
+- **Hard to misuse.** Read-only by default (writes opt-in), no plugin surface unless discovered, small attack surface.
 - **Easy to fork.** Apache 2.0 licensed, small codebase, designed to be adapted.
 
 This project is maintained by a small team - scope is deliberately limited so it stays that way. We may decline feature proposals that fall outside the areas listed below, even if they're well-executed.
@@ -22,9 +22,9 @@ If your use case needs features outside this scope, forking is actively encourag
 
 Bug reports should describe unintended or unexpected behaviour - not requests for new functionality (see "Feature requests" below for that).
 
-1. Check you're running the [latest release](https://github.com/netboxlabs/netbox-mcp-server/releases) - your bug may already be fixed.
-2. Search [existing issues](https://github.com/netboxlabs/netbox-mcp-server/issues) to see if it's been reported. If so, add a 👍 reaction and any extra context as a comment.
-3. If it's new, [open an issue](https://github.com/netboxlabs/netbox-mcp-server/issues/new) with clear reproduction steps, error messages, and NetBox/Python versions.
+1. Check you're running the [latest release](https://github.com/z23/netbox-mcp-server/releases) - your bug may already be fixed.
+2. Search [existing issues](https://github.com/z23/netbox-mcp-server/issues) to see if it's been reported. If so, add a 👍 reaction and any extra context as a comment.
+3. If it's new, [open an issue](https://github.com/z23/netbox-mcp-server/issues/new) with clear reproduction steps, error messages, and NetBox/Python versions.
 
 Tips:
 
