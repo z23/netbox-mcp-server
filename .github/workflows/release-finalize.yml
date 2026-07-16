@@ -3,6 +3,10 @@ name: Finalize Release
 # Triggered when a release PR (label: `release`) merges into main. Creates the
 # git tag at the merge commit and publishes a GitHub Release with the CHANGELOG
 # section for this version.
+#
+# Tags created with GITHUB_TOKEN do not fire other workflows' `on: push` triggers
+# (GitHub recursion guard). Docker publish is therefore chained explicitly via
+# workflow_dispatch — which *is* allowed to start a new run from GITHUB_TOKEN.
 
 permissions:
   contents: read
@@ -24,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write  # dispatch Docker Multi-arch Build and Publish
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -69,3 +74,17 @@ jobs:
             --target "${MERGE_SHA}" \
             --title "v${VERSION}" \
             --notes-file release_notes.md
+
+      # GITHUB_TOKEN tag/release creation does not trigger on.push workflows.
+      # Explicit workflow_dispatch is the supported way to chain Docker publish.
+      - name: Trigger Docker image publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="v${VERSION}"
+          # Run against the tag ref so github.ref_name is vX.Y.Z for image tags.
+          gh workflow run "Docker Multi-arch Build and Publish" \
+            --repo "${{ github.repository }}" \
+            --ref "${tag}"
+          echo "Dispatched Docker Multi-arch Build and Publish for ${tag}"
