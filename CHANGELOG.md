@@ -2,12 +2,36 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-07-16)
+
+First tagged release of the **z23** fork of [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server).
+Version continues from upstream **1.2.1** with a minor bump for fork features.
+
+### Features
+
+- Opt-in write tools behind `ENABLE_WRITES=true`: `netbox_create_object`, `netbox_update_object`, `netbox_delete_object`
+- `dry_run` on create/update/delete; `confirm=True` required for real deletes
+- Write deny-list (`WRITE_DENIED_TYPES`) for security-critical types (`users.*`, webhooks, event rules, scripts)
+- Refuse HTTP transport with writes enabled and no `MCP_AUTH_TOKEN` (override via `ALLOW_UNAUTHENTICATED_WRITES`)
+- Advisory OPTIONS preflight when writes are enabled; plugin-discovery surface warnings
+- Configurable `NETBOX_TIMEOUT`; changelog filter validation and pagination caps; search resilience for systemic errors
+- CORS bare-string origin handling
+
+### Documentation
+
+- Fork notice, tool name accuracy, Docker Hub image `z23hub/netbox-mcp-server`
+
+### Notes
+
+- Default behavior remains read-only (matches upstream unless writes are explicitly enabled)
+- Docker images publish to `docker.io/z23hub/netbox-mcp-server` on tag push
+
 ## Fork notes (z23/netbox-mcp-server)
 
 This repository is a fork of [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server).
 Entries below that link to `netboxlabs/...` are from upstream history.
 
-**Fork-specific changes** (not yet cut as a separate semver release tag on this fork):
+**Fork-specific changes** (first tagged as **v1.3.0** on this fork):
 
 - Opt-in write tools (`ENABLE_WRITES=true`): `create_object` / `update_object` / `delete_object`
 - Production hardening for writes and HTTP transport (`WRITE_DENIED_TYPES`, refuse unauthenticated HTTP writes, changelog caps, search resilience, `NETBOX_TIMEOUT`)
