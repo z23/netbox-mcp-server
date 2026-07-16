@@ -289,18 +289,18 @@ uv run netbox-mcp-server --transport http --port 9000       # Custom HTTP port
 
 ### Pre-built Image (Docker Hub)
 
-**This fork** publishes multi-arch images when a `v*.*.*` tag is pushed (requires Docker Hub credentials configured on the repository). Image name defaults to the GitHub repository path:
+**This fork** publishes multi-arch images to Docker Hub when a `v*.*.*` tag is pushed. Published image:
 
 ```bash
-docker pull z23/netbox-mcp-server:latest
+docker pull z23hub/netbox-mcp-server:latest
 ```
 
 Pin to a specific version in production. The `latest` tag tracks the most recent release and can change without notice. See this fork's [releases page](https://github.com/z23/netbox-mcp-server/releases) for available versions:
 
 ```bash
-docker pull z23/netbox-mcp-server:<X.Y.Z>   # exact version
-docker pull z23/netbox-mcp-server:<X.Y>     # latest within a minor
-docker pull z23/netbox-mcp-server:<X>       # latest within a major
+docker pull z23hub/netbox-mcp-server:<X.Y.Z>   # exact version
+docker pull z23hub/netbox-mcp-server:<X.Y>     # latest within a minor
+docker pull z23hub/netbox-mcp-server:<X>       # latest within a major
 ```
 
 Until this fork has published tags, **build the image locally** (see below) or use the upstream read-only image if you do not need write tools:
@@ -315,7 +315,7 @@ docker pull netboxlabs/netbox-mcp-server:latest   # upstream; read-only, no ENAB
 cosign verify \
   --certificate-identity-regexp '^https://github.com/z23/netbox-mcp-server/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  z23/netbox-mcp-server:<tag>
+  z23hub/netbox-mcp-server:<tag>
 ```
 
 ### Standard Docker Image
