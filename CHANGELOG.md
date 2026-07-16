@@ -2,6 +2,10 @@
 
 <!-- version list -->
 
+## v1.0.0 (2026-07-16)
+
+- Initial Release
+
 ## Fork notes (z23/netbox-mcp-server)
 
 This repository is a fork of [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server).
