@@ -66,6 +66,45 @@ def test_create_object_passes_fallback_endpoint(mock_netbox, mock_types):
     )
 
 
+@patch("netbox_mcp_server.server.netbox")
+def test_create_object_dry_run_returns_proposed_without_create(mock_netbox):
+    """dry_run=True validates the request and never calls the client."""
+    result = netbox_create_object(
+        object_type="dcim.site",
+        data={"name": "test-site", "slug": "test-site"},
+        dry_run=True,
+    )
+
+    mock_netbox.create.assert_not_called()
+    assert result == {
+        "dry_run": True,
+        "object_type": "dcim.site",
+        "endpoint": "dcim/sites",
+        "proposed": {"name": "test-site", "slug": "test-site"},
+    }
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_create_object_dry_run_still_validates_type(mock_netbox):
+    """dry_run does not bypass input validation."""
+    with pytest.raises(ValueError, match="Invalid object_type"):
+        netbox_create_object(object_type="not.real", data={"name": "x"}, dry_run=True)
+    mock_netbox.create.assert_not_called()
+
+
+@patch("netbox_mcp_server.server.write_denied_types", set(DEFAULT_WRITE_DENIED_TYPES))
+@patch("netbox_mcp_server.server.netbox")
+def test_create_object_dry_run_still_enforces_deny_list(mock_netbox):
+    """dry_run does not bypass the write deny-list."""
+    with pytest.raises(ValueError, match="deny-list"):
+        netbox_create_object(
+            object_type="users.token",
+            data={"description": "x"},
+            dry_run=True,
+        )
+    mock_netbox.create.assert_not_called()
+
+
 # ============================================================================
 # Update
 # ============================================================================
