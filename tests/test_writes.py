@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from netbox_mcp_server.config import DEFAULT_WRITE_DENIED_TYPES
 from netbox_mcp_server.server import (
     netbox_create_object,
     netbox_delete_object,
@@ -213,3 +214,50 @@ def test_http_error_falls_back_to_text_when_body_not_json(mock_netbox):
 
     with pytest.raises(ValueError, match="Internal Server Error"):
         netbox_update_object(object_type="dcim.site", object_id=1, data={"name": "x"})
+
+
+# ============================================================================
+# Write deny-list (defense-in-depth)
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "denied_type",
+    ["users.token", "users.user", "extras.webhook", "extras.script"],
+)
+@patch("netbox_mcp_server.server.write_denied_types", set(DEFAULT_WRITE_DENIED_TYPES))
+@patch("netbox_mcp_server.server.netbox")
+def test_create_denied_type_refused_by_default(mock_netbox, denied_type):
+    """Security-critical types are refused by the default write deny-list."""
+    with pytest.raises(ValueError, match="deny-list"):
+        netbox_create_object(object_type=denied_type, data={"name": "x"})
+    mock_netbox.create.assert_not_called()
+
+
+@patch("netbox_mcp_server.server.write_denied_types", set(DEFAULT_WRITE_DENIED_TYPES))
+@patch("netbox_mcp_server.server.netbox")
+def test_update_denied_type_refused_by_default(mock_netbox):
+    with pytest.raises(ValueError, match="deny-list"):
+        netbox_update_object(object_type="users.token", object_id=1, data={"key": "x"})
+    mock_netbox.update.assert_not_called()
+
+
+@patch("netbox_mcp_server.server.write_denied_types", set(DEFAULT_WRITE_DENIED_TYPES))
+@patch("netbox_mcp_server.server.netbox")
+def test_delete_denied_type_refused_before_confirm(mock_netbox):
+    """The deny-list is checked even with confirm=True and before any client call."""
+    with pytest.raises(ValueError, match="deny-list"):
+        netbox_delete_object(object_type="extras.webhook", object_id=1, confirm=True)
+    mock_netbox.delete.assert_not_called()
+
+
+@patch("netbox_mcp_server.server.write_denied_types", set())
+@patch("netbox_mcp_server.server.netbox")
+def test_denied_type_allowed_when_denylist_overridden(mock_netbox):
+    """An operator can override the deny-list (e.g. WRITE_DENIED_TYPES=[])."""
+    mock_netbox.create.return_value = {"id": 1}
+
+    result = netbox_create_object(object_type="users.token", data={"key": "x"})
+
+    assert result == {"id": 1}
+    mock_netbox.create.assert_called_once()

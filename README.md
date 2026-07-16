@@ -35,6 +35,8 @@ For chat, use cases, and general MCP discussion, join the NetBox community at [n
 
 > ⚠️ **Destructive operations**: `update_object` and `delete_object` modify NetBox state. The API token must have write permissions, and every mutation is logged at INFO level by this server and recorded in NetBox's changelog. `delete_object` requires an explicit `confirm=True` to guard against accidental calls.
 
+> 🔒 **Write safeguards**: Even with writes enabled, the tools refuse to mutate security-critical object types by default (`users.*`, `extras.webhook`, `extras.eventrule`, `extras.script`) as defense-in-depth on top of NetBox token scoping — see `WRITE_DENIED_TYPES`. When the HTTP transport is used with writes enabled but no `MCP_AUTH_TOKEN`, the server **refuses to start** (override with `ALLOW_UNAUTHENTICATED_WRITES=true` for trusted localhost-only use).
+
 > Note: Core NetBox object types are always available. Plugin object types can be auto-discovered. See [Plugin Object Type Discovery](#plugin-object-type-discovery). Advanced features (GraphQL, dynamic model discovery, etc.) are deliberately out of scope. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full scope statement and rationale.
 
 ## Usage
@@ -184,6 +186,7 @@ The server supports multiple configuration sources with the following precedence
 |---------|------|---------|----------|-------------|
 | `NETBOX_URL` | URL | - | Yes | Base URL of your NetBox instance (e.g., https://netbox.example.com/) |
 | `NETBOX_TOKEN` | String | - | Yes | API token for authentication |
+| `NETBOX_TIMEOUT` | Number | `30` | No | Per-request timeout (seconds) for NetBox API calls |
 | `TRANSPORT` | `stdio` \| `http` | `stdio` | No | MCP transport protocol |
 | `HOST` | String | `127.0.0.1` | If HTTP | Host address for HTTP server |
 | `PORT` | Integer | `8000` | If HTTP | Port for HTTP server |
@@ -191,6 +194,8 @@ The server supports multiple configuration sources with the following precedence
 | `VERIFY_SSL` | Boolean | `true` | No | Whether to verify SSL certificates |
 | `ENABLE_PLUGIN_DISCOVERY` | Boolean | `false` | No | Auto-discover plugin object types at startup |
 | `ENABLE_WRITES` | Boolean | `false` | No | Register `create_object`/`update_object`/`delete_object` tools. Token must have write permissions in NetBox. |
+| `WRITE_DENIED_TYPES` | JSON list | `["users.*", "extras.webhook", "extras.eventrule", "extras.script"]` | No | Object types the write tools refuse to mutate even when writes are enabled. Entries ending in `.*` match a whole app label. Defense-in-depth on top of token scoping; set to `[]` to disable. |
+| `ALLOW_UNAUTHENTICATED_WRITES` | Boolean | `false` | No | Permit writes on the HTTP transport with no `MCP_AUTH_TOKEN`. When false (default), the server **refuses to start** in that configuration. Set true only for a trusted, localhost-only deployment. |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` \| `CRITICAL` | `INFO` | No | Logging verbosity |
 
 ### Transport Examples

@@ -78,6 +78,10 @@ def _stub_main_deps(monkeypatch, *, enable_writes: bool):
     settings.netbox_url = "https://nb.example.com/"
     settings.netbox_token = MagicMock()
     settings.netbox_token.get_secret_value.return_value = "tok"
+    settings.netbox_timeout = 30.0
+    settings.mcp_auth_token = None
+    settings.allow_unauthenticated_writes = False
+    settings.write_denied_types = []
     settings.get_effective_config_summary.return_value = {}
 
     monkeypatch.setattr(server_module, "parse_cli_args", lambda: {})
