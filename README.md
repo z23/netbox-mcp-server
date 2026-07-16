@@ -19,21 +19,24 @@ For chat, use cases, and general MCP discussion, join the NetBox community at [n
 
 ## Tools
 
+Registered MCP tool names (what clients list under `tools/list`):
+
 | Tool | Description |
 |------|-------------|
-| get_objects | Retrieves NetBox core objects based on their type and filters |
-| get_object_by_id | Gets detailed information about a specific NetBox object by its ID |
-| get_changelogs | Retrieves change history records (audit trail) based on filters |
+| `netbox_get_objects` | Retrieves NetBox core objects based on their type and filters |
+| `netbox_get_object_by_id` | Gets detailed information about a specific NetBox object by its ID |
+| `netbox_get_changelogs` | Retrieves change history records (audit trail) based on filters |
+| `netbox_search_objects` | Global search across common NetBox object types |
 
 **Write tools (off by default; set `ENABLE_WRITES=true` to register):**
 
 | Tool | Description |
 |------|-------------|
-| create_object | Creates a NetBox object |
-| update_object | PATCH-updates a NetBox object. Supports `dry_run=True` to preview the diff before committing |
-| delete_object | Deletes a NetBox object. Requires `confirm=True`; supports `dry_run=True` to preview the target |
+| `netbox_create_object` | Creates a NetBox object |
+| `netbox_update_object` | PATCH-updates a NetBox object. Supports `dry_run=True` to preview the diff before committing |
+| `netbox_delete_object` | Deletes a NetBox object. Requires `confirm=True`; supports `dry_run=True` to preview the target |
 
-> ⚠️ **Destructive operations**: `update_object` and `delete_object` modify NetBox state. The API token must have write permissions, and every mutation is logged at INFO level by this server and recorded in NetBox's changelog. `delete_object` requires an explicit `confirm=True` to guard against accidental calls.
+> ⚠️ **Destructive operations**: `netbox_update_object` and `netbox_delete_object` modify NetBox state. The API token must have write permissions, and every mutation is logged at INFO level by this server and recorded in NetBox's changelog. `netbox_delete_object` requires an explicit `confirm=True` to guard against accidental calls.
 
 > 🔒 **Write safeguards**: Even with writes enabled, the tools refuse to mutate security-critical object types by default (`users.*`, `extras.webhook`, `extras.eventrule`, `extras.script`) as defense-in-depth on top of NetBox token scoping — see `WRITE_DENIED_TYPES`. When the HTTP transport is used with writes enabled but no `MCP_AUTH_TOKEN`, the server **refuses to start** (override with `ALLOW_UNAUTHENTICATED_WRITES=true` for trusted localhost-only use).
 
@@ -152,11 +155,11 @@ Both `netbox_get_objects()` and `netbox_get_object_by_id()` support an optional 
 
 ```python
 # Without fields: ~5000 tokens for 50 devices
-devices = netbox_get_objects('devices', {'site': 'datacenter-1'})
+devices = netbox_get_objects('dcim.device', {'site': 'datacenter-1'})
 
 # With fields: ~500 tokens (90% reduction)
 devices = netbox_get_objects(
-    'devices',
+    'dcim.device',
     {'site': 'datacenter-1'},
     fields=['id', 'name', 'status', 'site']
 )
@@ -286,27 +289,33 @@ uv run netbox-mcp-server --transport http --port 9000       # Custom HTTP port
 
 ### Pre-built Image (Docker Hub)
 
-Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published to Docker Hub on every tagged release:
+**This fork** publishes multi-arch images when a `v*.*.*` tag is pushed (requires Docker Hub credentials configured on the repository). Image name defaults to the GitHub repository path:
 
 ```bash
-docker pull netboxlabs/netbox-mcp-server:latest
+docker pull z23/netbox-mcp-server:latest
 ```
 
-Pin to a specific version in production. The `latest` tag tracks the most recent release and can change without notice. See the [releases page](https://github.com/netboxlabs/netbox-mcp-server/releases) for available versions:
+Pin to a specific version in production. The `latest` tag tracks the most recent release and can change without notice. See this fork's [releases page](https://github.com/z23/netbox-mcp-server/releases) for available versions:
 
 ```bash
-docker pull netboxlabs/netbox-mcp-server:<X.Y.Z>   # exact version
-docker pull netboxlabs/netbox-mcp-server:<X.Y>     # latest within a minor
-docker pull netboxlabs/netbox-mcp-server:<X>       # latest within a major
+docker pull z23/netbox-mcp-server:<X.Y.Z>   # exact version
+docker pull z23/netbox-mcp-server:<X.Y>     # latest within a minor
+docker pull z23/netbox-mcp-server:<X>       # latest within a major
 ```
 
-**Verify image provenance (optional but recommended).** Images are signed with [cosign](https://github.com/sigstore/cosign) (keyless, via GitHub OIDC) and ship with SLSA build provenance:
+Until this fork has published tags, **build the image locally** (see below) or use the upstream read-only image if you do not need write tools:
+
+```bash
+docker pull netboxlabs/netbox-mcp-server:latest   # upstream; read-only, no ENABLE_WRITES tools
+```
+
+**Verify image provenance (optional but recommended)** for images published by this fork's GitHub Actions:
 
 ```bash
 cosign verify \
-  --certificate-identity-regexp '^https://github.com/netboxlabs/netbox-mcp-server/' \
+  --certificate-identity-regexp '^https://github.com/z23/netbox-mcp-server/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  netboxlabs/netbox-mcp-server:<tag>
+  z23/netbox-mcp-server:<tag>
 ```
 
 ### Standard Docker Image
