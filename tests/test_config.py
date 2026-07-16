@@ -213,6 +213,22 @@ def test_allow_unauthenticated_writes_defaults_false():
     assert _settings().allow_unauthenticated_writes is False
 
 
+def test_cors_origins_accepts_bare_string():
+    """A single origin string is wrapped into a list (env footgun)."""
+    settings = _settings(cors_origins="http://localhost:6274")
+    assert settings.cors_origins == ["http://localhost:6274"]
+
+
+def test_cors_origins_accepts_json_list_string():
+    settings = _settings(cors_origins='["http://localhost:6274", "https://app.example.com"]')
+    assert settings.cors_origins == ["http://localhost:6274", "https://app.example.com"]
+
+
+def test_cors_origins_rejects_invalid_url():
+    with pytest.raises(ValidationError, match="Invalid CORS_ORIGIN"):
+        _settings(cors_origins=["not-a-url"])
+
+
 # ===== Startup Safety Guard (_unsafe_runtime_config) =====
 
 

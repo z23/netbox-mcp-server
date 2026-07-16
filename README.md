@@ -32,7 +32,7 @@ Registered MCP tool names (what clients list under `tools/list`):
 
 | Tool | Description |
 |------|-------------|
-| `netbox_create_object` | Creates a NetBox object |
+| `netbox_create_object` | Creates a NetBox object. Supports `dry_run=True` to preview without POSTing |
 | `netbox_update_object` | PATCH-updates a NetBox object. Supports `dry_run=True` to preview the diff before committing |
 | `netbox_delete_object` | Deletes a NetBox object. Requires `confirm=True`; supports `dry_run=True` to preview the target |
 
@@ -420,6 +420,10 @@ Discovered plugin types use the `app_label.model` naming convention (e.g., `netb
 - NetBox 4.2 or later
 - API token must have read access to the object-types endpoint
 - Plugin models must expose a REST API endpoint to be discovered
+
+### Writes and Plugin Discovery
+
+If both `ENABLE_PLUGIN_DISCOVERY=true` and `ENABLE_WRITES=true` are set, discovered plugin object types are added to the same registry used by the write tools. Startup logs how many plugin types expanded the writable surface. Scope the NetBox API token tightly; the write deny-list only covers the built-in security-critical types by default.
 
 ### Failure Behavior
 

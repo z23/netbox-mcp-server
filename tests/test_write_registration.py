@@ -9,6 +9,7 @@ settings.enable_writes is True.
 import asyncio
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastmcp import FastMCP
 
@@ -105,3 +106,51 @@ def test_main_registers_writes_when_setting_true(monkeypatch):
     with patch.object(server_module, "_register_write_tools") as mock_reg:
         server_module.main()
         mock_reg.assert_called_once_with(server_module.mcp)
+
+
+# ============================================================================
+# main() wiring: advisory write-endpoint preflight probe
+# ============================================================================
+
+
+def test_main_calls_write_preflight_when_writes_enabled(monkeypatch):
+    """When writes are enabled, main() must invoke the advisory endpoint probe."""
+    mock_client = MagicMock()
+    _stub_main_deps(monkeypatch, enable_writes=True)
+    monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: mock_client)
+
+    server_module.main()
+    mock_client.verify_write_endpoint_available.assert_called_once_with()
+
+
+def test_main_skips_write_preflight_when_writes_disabled(monkeypatch):
+    """When writes are off, do not probe write endpoints."""
+    mock_client = MagicMock()
+    _stub_main_deps(monkeypatch, enable_writes=False)
+    monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: mock_client)
+
+    server_module.main()
+    mock_client.verify_write_endpoint_available.assert_not_called()
+
+
+def test_main_continues_when_preflight_reports_endpoint_without_write_methods(monkeypatch):
+    """The advisory probe must not block startup when endpoint support is unclear."""
+    mock_client = MagicMock()
+    mock_client.verify_write_endpoint_available.side_effect = RuntimeError("no write methods")
+    _stub_main_deps(monkeypatch, enable_writes=True)
+    monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: mock_client)
+
+    server_module.main()
+    mock_client.verify_write_endpoint_available.assert_called_once_with()
+
+
+def test_main_continues_when_preflight_raises_network_error(monkeypatch):
+    """Probe failures are advisory — startup must continue."""
+    mock_client = MagicMock()
+    mock_client.verify_write_endpoint_available.side_effect = httpx.ConnectError("dns failure")
+    _stub_main_deps(monkeypatch, enable_writes=True)
+    monkeypatch.setattr(server_module, "NetBoxRestClient", lambda **_: mock_client)
+
+    # Should not raise — server starts despite an ambiguous probe.
+    server_module.main()
+    mock_client.verify_write_endpoint_available.assert_called_once_with()

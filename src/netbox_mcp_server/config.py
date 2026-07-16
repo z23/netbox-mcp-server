@@ -1,5 +1,6 @@
 """Configuration management for NetBox MCP Server."""
 
+import json
 import logging
 import logging.config
 from typing import Any, Literal
@@ -153,8 +154,31 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", mode="before")
     @classmethod
     def validate_cors_origins(cls, v: object) -> list[str]:
-        """Ensure each CORS origin is a valid URL."""
+        """Ensure each CORS origin is a valid URL.
+
+        Accept a single bare origin string (common env footgun) by wrapping it
+        in a one-element list. Without this, iterating a str walks characters
+        and yields a confusing 'Invalid CORS_ORIGIN: \\'h\\'' error.
+        """
+        if v is None:
+            return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return []
+            # JSON list from env (pydantic-settings usually parses this already)
+            if stripped.startswith("["):
+                parsed_json = json.loads(stripped)
+                if not isinstance(parsed_json, list):
+                    raise ValueError("CORS_ORIGINS JSON value must be a list of origin strings")
+                v = parsed_json
+            else:
+                v = [stripped]
+        if not isinstance(v, list):
+            raise ValueError("CORS_ORIGINS must be a list of origin strings")
         for origin in v:
+            if not isinstance(origin, str):
+                raise ValueError(f"Invalid CORS_ORIGIN: {origin!r} (expected a string)")
             if origin == "*":
                 continue
             parsed = urlparse(origin)
