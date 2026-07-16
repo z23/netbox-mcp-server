@@ -1,7 +1,8 @@
 """Tests for global search functionality (netbox_search_objects tool)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
@@ -164,6 +165,47 @@ def test_continues_searching_when_one_type_fails(mock_netbox):
     assert result["dcim.site"] == [{"id": 1, "name": "site01"}]
     # Failed type has empty list
     assert result["dcim.device"] == []
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_reraises_on_auth_error(mock_netbox):
+    """A 401/403 is systemic and must surface, not be masked as empty results."""
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = 403
+    mock_netbox.get.side_effect = httpx.HTTPStatusError(
+        "403 Forbidden", request=MagicMock(), response=response
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        netbox_search_objects(query="x", object_types=["dcim.device"])
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_reraises_on_connect_error(mock_netbox):
+    """NetBox unreachable must surface, not return an empty result set."""
+    mock_netbox.get.side_effect = httpx.ConnectError("connection refused")
+
+    with pytest.raises(httpx.ConnectError):
+        netbox_search_objects(query="x", object_types=["dcim.device"])
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_skips_non_auth_http_error_and_continues(mock_netbox):
+    """A per-type 400 (e.g. endpoint lacks q support) is skipped; others continue."""
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = 400
+
+    def side_effect(endpoint, params, fallback_endpoint=None):
+        if "devices" in endpoint:
+            raise httpx.HTTPStatusError("400", request=MagicMock(), response=response)
+        return {"count": 0, "next": None, "previous": None, "results": []}
+
+    mock_netbox.get.side_effect = side_effect
+
+    result = netbox_search_objects(query="x", object_types=["dcim.device", "dcim.site"])
+
+    assert result["dcim.device"] == []
+    assert result["dcim.site"] == []
 
 
 # ============================================================================

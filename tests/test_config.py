@@ -177,3 +177,70 @@ def test_configure_logging_shows_http_clients_at_debug():
     assert root_logger.level == logging.DEBUG
     assert urllib3_logger.level == logging.DEBUG
     assert httpx_logger.level == logging.DEBUG
+
+
+# ===== Timeout & Write-Safety Settings =====
+
+
+def _settings(**kw):
+    base = {
+        "netbox_url": "https://netbox.example.com/",
+        "netbox_token": "tok",
+        "_env_file": None,
+    }
+    base.update(kw)
+    return Settings(**base)
+
+
+def test_netbox_timeout_defaults_to_30():
+    assert _settings().netbox_timeout == 30.0
+
+
+def test_netbox_timeout_rejects_non_positive():
+    with pytest.raises(ValidationError, match="netbox_timeout"):
+        _settings(netbox_timeout=0)
+
+
+def test_write_denied_types_default_covers_sensitive_types():
+    denied = _settings().write_denied_types
+    assert "users.*" in denied
+    assert "extras.webhook" in denied
+    assert "extras.eventrule" in denied
+    assert "extras.script" in denied
+
+
+def test_allow_unauthenticated_writes_defaults_false():
+    assert _settings().allow_unauthenticated_writes is False
+
+
+# ===== Startup Safety Guard (_unsafe_runtime_config) =====
+
+
+def test_unsafe_when_http_writes_without_auth():
+    """Writes on HTTP with no auth token must be flagged as unsafe to start."""
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="http", enable_writes=True)
+    assert _unsafe_runtime_config(settings) is not None
+
+
+def test_safe_when_auth_token_set():
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="http", enable_writes=True, mcp_auth_token="secret")
+    assert _unsafe_runtime_config(settings) is None
+
+
+def test_safe_when_unauthenticated_writes_explicitly_allowed():
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="http", enable_writes=True, allow_unauthenticated_writes=True)
+    assert _unsafe_runtime_config(settings) is None
+
+
+def test_safe_for_stdio_writes_without_auth():
+    """stdio transport is not network-exposed, so writes without a token are fine."""
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="stdio", enable_writes=True)
+    assert _unsafe_runtime_config(settings) is None

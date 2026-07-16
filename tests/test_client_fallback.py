@@ -23,6 +23,21 @@ def client():
     )
 
 
+def test_client_defaults_to_30s_timeout():
+    """The client applies a bounded default timeout to NetBox calls."""
+    client = NetBoxRestClient(url="https://netbox.example.com", token="tok")
+    assert client.timeout == 30.0
+
+
+def test_client_passes_timeout_to_httpx():
+    """A configured timeout is forwarded to the underlying httpx client."""
+    with patch("netbox_mcp_server.netbox_client.httpx.Client") as mock_client:
+        NetBoxRestClient(url="https://netbox.example.com", token="tok", timeout=12.5)
+
+    _, kwargs = mock_client.call_args
+    assert kwargs["timeout"] == 12.5
+
+
 # ============================================================================
 # Fallback Trigger Conditions
 # ============================================================================

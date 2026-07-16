@@ -8,6 +8,18 @@ from urllib.parse import urlparse
 from pydantic import AnyUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Object types the write tools refuse to mutate by default when ENABLE_WRITES=true.
+# These are security-critical: writing them can mint credentials, grant permissions,
+# or run code. An entry ending in ".*" matches a whole app label (e.g. "users.*").
+# This is defense-in-depth on top of NetBox API-token scoping, and is overridable
+# via the write_denied_types setting (WRITE_DENIED_TYPES).
+DEFAULT_WRITE_DENIED_TYPES: list[str] = [
+    "users.*",
+    "extras.webhook",
+    "extras.eventrule",
+    "extras.script",
+]
+
 
 class Settings(BaseSettings):
     """
@@ -24,6 +36,9 @@ class Settings(BaseSettings):
 
     netbox_token: SecretStr
     """API token for NetBox authentication (treated as secret)"""
+
+    netbox_timeout: float = 30.0
+    """Per-request timeout (seconds) for calls to the NetBox API."""
 
     # ===== Transport Settings =====
     transport: Literal["stdio", "http"] = "stdio"
@@ -58,6 +73,19 @@ class Settings(BaseSettings):
     enable_writes: bool = False
     """Whether to register create/update/delete tools. Requires NetBox token with write perms."""
 
+    write_denied_types: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_WRITE_DENIED_TYPES),
+        description=(
+            "Object types the write tools refuse to mutate even when ENABLE_WRITES=true. "
+            "Entries ending in '.*' match a whole app label. Defense-in-depth on top of "
+            "NetBox token scoping. Set to [] to disable (rely on token scoping alone)."
+        ),
+    )
+    """Object types the write tools refuse to mutate (defense-in-depth deny-list)."""
+
+    allow_unauthenticated_writes: bool = False
+    """Permit HTTP transport with writes enabled but no MCP_AUTH_TOKEN (trusted localhost only)."""
+
     # ===== Security Settings =====
     verify_ssl: bool = True
     """Whether to verify SSL certificates when connecting to NetBox"""
@@ -83,6 +111,14 @@ class Settings(BaseSettings):
         """Ensure port is in valid range."""
         if not (0 < v < 65536):
             raise ValueError(f"Port must be between 1 and 65535, got {v}")
+        return v
+
+    @field_validator("netbox_timeout")
+    @classmethod
+    def validate_netbox_timeout(cls, v: float) -> float:
+        """Ensure the NetBox request timeout is positive."""
+        if v <= 0:
+            raise ValueError(f"netbox_timeout must be greater than 0, got {v}")
         return v
 
     @field_validator("mcp_auth_token", mode="after")
@@ -138,12 +174,15 @@ class Settings(BaseSettings):
         summary: dict[str, Any] = {
             "netbox_url": str(self.netbox_url),
             "netbox_token": "***REDACTED***",
+            "netbox_timeout": self.netbox_timeout,
             "transport": self.transport,
             "verify_ssl": self.verify_ssl,
             "enable_plugin_discovery": self.enable_plugin_discovery,
             "enable_writes": self.enable_writes,
             "log_level": self.log_level,
         }
+        if self.enable_writes:
+            summary["write_denied_types"] = self.write_denied_types
         if self.transport == "http":
             summary.update(
                 {
@@ -151,6 +190,7 @@ class Settings(BaseSettings):
                     "port": self.port,
                     "cors_origins": self.cors_origins,
                     "mcp_auth_token": "***REDACTED***" if self.mcp_auth_token else None,
+                    "allow_unauthenticated_writes": self.allow_unauthenticated_writes,
                 }
             )
         return summary

@@ -13,7 +13,11 @@ from pydantic import Field, SecretStr
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 
-from netbox_mcp_server.config import Settings, configure_logging
+from netbox_mcp_server.config import (
+    DEFAULT_WRITE_DENIED_TYPES,
+    Settings,
+    configure_logging,
+)
 from netbox_mcp_server.netbox_client import NetBoxRestClient
 from netbox_mcp_server.netbox_types import NETBOX_OBJECT_TYPES
 
@@ -39,7 +43,12 @@ def parse_cli_args() -> dict[str, Any]:
     parser.add_argument(
         "--netbox-token",
         type=str,
-        help="API token for NetBox authentication",
+        help="API token for NetBox authentication (prefer the NETBOX_TOKEN env var)",
+    )
+    parser.add_argument(
+        "--netbox-timeout",
+        type=float,
+        help="Per-request timeout in seconds for NetBox API calls (default: 30)",
     )
 
     # Transport settings
@@ -106,6 +115,25 @@ def parse_cli_args() -> dict[str, Any]:
         dest="enable_writes",
         help="Register create/update/delete tools (requires NetBox token with write perms)",
     )
+    parser.add_argument(
+        "--write-denied-types",
+        action="append",
+        dest="write_denied_types",
+        help=(
+            "Object type the write tools refuse to mutate (repeat flag). Entries ending "
+            "in '.*' match a whole app label. Replaces the default deny-list."
+        ),
+    )
+    parser.add_argument(
+        "--allow-unauthenticated-writes",
+        action="store_true",
+        default=None,
+        dest="allow_unauthenticated_writes",
+        help=(
+            "Permit writes on the HTTP transport with no MCP_AUTH_TOKEN "
+            "(trusted localhost only; otherwise the server refuses to start)"
+        ),
+    )
 
     # Observability settings
     parser.add_argument(
@@ -122,6 +150,8 @@ def parse_cli_args() -> dict[str, Any]:
         overlay["netbox_url"] = args.netbox_url
     if args.netbox_token is not None:
         overlay["netbox_token"] = args.netbox_token
+    if args.netbox_timeout is not None:
+        overlay["netbox_timeout"] = args.netbox_timeout
     if args.transport is not None:
         overlay["transport"] = args.transport
     if args.host is not None:
@@ -138,6 +168,10 @@ def parse_cli_args() -> dict[str, Any]:
         overlay["enable_plugin_discovery"] = args.enable_plugin_discovery
     if args.enable_writes is not None:
         overlay["enable_writes"] = args.enable_writes
+    if args.write_denied_types is not None:
+        overlay["write_denied_types"] = args.write_denied_types
+    if args.allow_unauthenticated_writes is not None:
+        overlay["allow_unauthenticated_writes"] = args.allow_unauthenticated_writes
     if args.log_level is not None:
         overlay["log_level"] = args.log_level
 
@@ -204,6 +238,34 @@ DEFAULT_SEARCH_TYPES = [
 
 mcp = FastMCP("NetBox")
 netbox = None
+
+# Object types the write tools refuse to mutate (defense-in-depth on top of NetBox
+# token scoping). Seeded with the safe default so an unwired import still denies;
+# main() overrides this from settings.write_denied_types.
+write_denied_types: set[str] = set(DEFAULT_WRITE_DENIED_TYPES)
+
+
+def _ensure_write_allowed(object_type: str) -> None:
+    """Reject writes to security-critical object types.
+
+    The primary control is NetBox API-token scoping; this is a server-side backstop
+    so a broadly-scoped token combined with prompt injection cannot mint credentials,
+    grant permissions, or point webhooks/scripts at an attacker. An entry in the
+    deny-list ending in ".*" matches a whole app label (e.g. "users.*").
+
+    Args:
+        object_type: The NetBox object type being mutated (e.g. "dcim.device")
+
+    Raises:
+        ValueError: If the object type is in the configured write deny-list.
+    """
+    app_label = object_type.split(".", 1)[0]
+    if object_type in write_denied_types or f"{app_label}.*" in write_denied_types:
+        raise ValueError(
+            f"Refusing to write '{object_type}': this object type is in the write "
+            "deny-list because mutating it is security-critical. Override via the "
+            "WRITE_DENIED_TYPES setting only if you intentionally need to mutate it."
+        )
 
 
 def validate_filters(filters: dict) -> None:
@@ -488,6 +550,8 @@ def netbox_create_object(
         valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
         raise ValueError(f"Invalid object_type. Must be one of:\n{valid_types}")
 
+    _ensure_write_allowed(object_type)
+
     if not data:
         raise ValueError("data must be a non-empty dict")
 
@@ -529,6 +593,8 @@ def netbox_update_object(
     if object_type not in NETBOX_OBJECT_TYPES:
         valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
         raise ValueError(f"Invalid object_type. Must be one of:\n{valid_types}")
+
+    _ensure_write_allowed(object_type)
 
     if not data:
         raise ValueError("data must be a non-empty dict")
@@ -589,6 +655,8 @@ def netbox_delete_object(
         valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
         raise ValueError(f"Invalid object_type. Must be one of:\n{valid_types}")
 
+    _ensure_write_allowed(object_type)
+
     logger = logging.getLogger(__name__)
     endpoint, fallback = _get_endpoint_info(object_type)
 
@@ -628,12 +696,21 @@ def netbox_delete_object(
 
 
 @mcp.tool
-def netbox_get_changelogs(filters: dict):
+def netbox_get_changelogs(
+    filters: dict,
+    limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
+    offset: Annotated[int, Field(default=0, ge=0)] = 0,
+):
     """
     Get object change records (changelogs) from NetBox based on filters.
 
     Args:
-        filters: dict of filters to apply to the API call based on the NetBox API filtering options
+        filters: dict of filters to apply to the API call based on the NetBox API filtering options.
+                 Same FILTER RULES as netbox_get_objects apply (no '__in' suffix, no multi-hop
+                 traversal); invalid patterns are rejected rather than silently ignored by NetBox.
+        limit: Maximum results to return (default 5, max 100). Changelog rows embed full
+               pre/post-change object snapshots, so keep this small to bound payload size.
+        offset: Skip this many results for pagination (default 0).
 
     Returns:
         Paginated response dict with the following structure:
@@ -683,10 +760,19 @@ def netbox_get_changelogs(filters: dict):
     - postchange_data: The object's data after the change (null for deletions)
     - time: The timestamp when the change was made
     """
+    # Validate filter patterns (consistent with netbox_get_objects)
+    validate_filters(filters)
+
     endpoint = "core/object-changes"
 
+    # Build params with pagination; set after the copy so a limit/offset smuggled
+    # into filters cannot override the capped values.
+    params = filters.copy()
+    params["limit"] = limit
+    params["offset"] = offset
+
     # Make API call
-    return netbox.get(endpoint, params=filters)
+    return netbox.get(endpoint, params=params)
 
 
 @mcp.tool(
@@ -748,6 +834,7 @@ def netbox_search_objects(
     """
     Perform global search across NetBox infrastructure.
     """
+    logger = logging.getLogger(__name__)
     search_types = object_types if object_types is not None else DEFAULT_SEARCH_TYPES
 
     # Validate all object types exist in mapping
@@ -758,7 +845,10 @@ def netbox_search_objects(
 
     results = {obj_type: [] for obj_type in search_types}
 
-    # Build results dictionary (error-resilient)
+    # Build results dictionary. Per-type quirks (e.g. an endpoint that does not
+    # support the `q` search) are skipped with a warning, but systemic failures
+    # (auth errors, NetBox unreachable/too slow) are re-raised so an all-types-
+    # failed search is not returned as a misleading "no results".
     for obj_type in search_types:
         try:
             endpoint, fallback = _get_endpoint_info(obj_type)
@@ -773,9 +863,20 @@ def netbox_search_objects(
             )
             # Extract results array from paginated response
             results[obj_type] = response.get("results", [])
-        except Exception:  # noqa: S112 - intentional error-resilient search
-            # Continue searching other types if one fails
-            # results[obj_type] already has empty list
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in (401, 403):
+                # Authentication/permission failure affects every type, not just
+                # this one — surface it instead of masking it as an empty result.
+                raise
+            logger.warning(f"Search skipped '{obj_type}': NetBox returned HTTP {status}")
+            continue
+        except (httpx.ConnectError, httpx.TimeoutException):
+            # NetBox unreachable or too slow affects every type — do not mask.
+            raise
+        except Exception as exc:
+            # Resilient to per-type endpoint quirks: log and move on.
+            logger.warning(f"Search skipped '{obj_type}': {exc}")
             continue
 
     return results
@@ -920,9 +1021,38 @@ def _register_write_tools(mcp_instance: FastMCP) -> None:
     mcp_instance.tool(netbox_delete_object)
 
 
+def _unsafe_runtime_config(settings: Settings) -> str | None:
+    """Return an error message if the runtime config is unsafe to start, else None.
+
+    Guards the fail-open case: write tools enabled on the HTTP transport with no
+    bearer token would expose an unauthenticated create/update/delete endpoint.
+    The server refuses to start rather than emitting only a warning.
+
+    Args:
+        settings: The resolved server settings.
+
+    Returns:
+        A human-readable reason to abort startup, or None when the config is safe.
+    """
+    if (
+        settings.transport == "http"
+        and settings.enable_writes
+        and settings.mcp_auth_token is None
+        and not settings.allow_unauthenticated_writes
+    ):
+        return (
+            "Refusing to start: write tools are enabled on the HTTP transport with no "
+            "MCP_AUTH_TOKEN set, which would expose an unauthenticated create/update/"
+            "delete endpoint. Set MCP_AUTH_TOKEN (clients then send 'Authorization: "
+            "Bearer <token>'), or set ALLOW_UNAUTHENTICATED_WRITES=true to override for "
+            "a trusted, localhost-only deployment."
+        )
+    return None
+
+
 def main() -> None:
     """Main entry point for the MCP server."""
-    global netbox
+    global netbox, write_denied_types
 
     cli_overlay: dict[str, Any] = parse_cli_args()
 
@@ -937,6 +1067,15 @@ def main() -> None:
 
     logger.info("Starting NetBox MCP Server")
     logger.info(f"Effective configuration: {settings.get_effective_config_summary()}")
+
+    # Fail safe before any binding: refuse an unauthenticated write endpoint.
+    unsafe = _unsafe_runtime_config(settings)
+    if unsafe:
+        logger.error(unsafe)
+        sys.exit(1)
+
+    # Sync the write deny-list from settings (operators may override the default).
+    write_denied_types = set(settings.write_denied_types)
 
     if not settings.verify_ssl:
         logger.warning(
@@ -964,6 +1103,7 @@ def main() -> None:
             url=str(settings.netbox_url),
             token=settings.netbox_token.get_secret_value(),
             verify_ssl=settings.verify_ssl,
+            timeout=settings.netbox_timeout,
         )
         logger.debug("NetBox client initialized successfully")
     except Exception as e:
@@ -982,10 +1122,12 @@ def main() -> None:
             bind = f"http://{settings.host}:{settings.port}"
         else:
             bind = "stdio"
+        denied = ", ".join(sorted(write_denied_types)) or "(none)"
         logger.warning(
             f"Write tools ENABLED ({bind}). NetBox API token must have write "
             "permissions; all mutations are recorded in NetBox's changelog. "
-            "Verify the bind address is not exposed to untrusted networks."
+            "Verify the bind address is not exposed to untrusted networks. "
+            f"Write deny-list (security-critical types refused): {denied}."
         )
 
     try:
