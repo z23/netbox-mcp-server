@@ -94,6 +94,13 @@ def _stub_main_deps(monkeypatch, *, enable_writes: bool):
     # mcp.run would block; replace with no-op.
     monkeypatch.setattr(server_module.mcp, "run", lambda **_: None)
 
+    # Registration is a side effect on the SHARED module-level FastMCP instance.
+    # The tests using this helper assert on the preflight probe and on whether
+    # registration was requested, never on the registry itself, so stub it out
+    # rather than mutating global state. tests/conftest.py also cleans up, but
+    # not leaking in the first place is cheaper than unwinding it.
+    monkeypatch.setattr(server_module, "_register_write_tools", lambda _: None)
+
 
 def test_main_does_not_register_writes_when_setting_false(monkeypatch):
     _stub_main_deps(monkeypatch, enable_writes=False)
@@ -155,3 +162,41 @@ def test_main_continues_when_preflight_raises_network_error(monkeypatch):
     # Should not raise — server starts despite an ambiguous probe.
     server_module.main()
     mock_client.verify_write_endpoint_available.assert_called_once_with()
+
+
+# ============================================================================
+# Global-state hygiene
+#
+# main() assigns module globals and registers tools on the shared FastMCP
+# instance. Before tests/conftest.py existed, that leaked across tests and made
+# test_module_level_mcp_has_no_write_tools_at_import above pass only because of
+# where it sits in the file — selecting node IDs in the other order failed.
+# ============================================================================
+
+
+def test_main_does_not_leak_write_tools_onto_shared_instance(monkeypatch):
+    """Calling main() must not mutate the shared registry the guard tests read."""
+    _stub_main_deps(monkeypatch, enable_writes=True)
+
+    server_module.main()
+
+    assert _tool_names(server_module.mcp) & WRITE_TOOL_NAMES == set()
+
+
+def test_main_does_not_leave_denylist_disarmed(monkeypatch):
+    """main() sets write_denied_types from settings; conftest must restore it.
+
+    The stub uses write_denied_types=[], so without restoration every later test
+    would run with the deny-list empty and any test that forgot to re-patch it
+    would pass vacuously.
+    """
+    _stub_main_deps(monkeypatch, enable_writes=True)
+
+    server_module.main()
+    assert server_module.write_denied_types == set()  # what main() set
+
+    # The autouse fixture in conftest.py restores the real default after this
+    # test returns; assert the default is non-empty so the restore is meaningful.
+    from netbox_mcp_server.config import DEFAULT_WRITE_DENIED_TYPES
+
+    assert DEFAULT_WRITE_DENIED_TYPES
