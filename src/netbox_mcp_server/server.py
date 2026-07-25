@@ -463,8 +463,12 @@ def netbox_get_objects(
         if ordering.strip() != "":
             params["ordering"] = ordering
 
-    # Make API call
-    return netbox.get(endpoint, params=params, fallback_endpoint=fallback)
+    # Make API call. Surface NetBox's response body on a 4xx so the caller learns
+    # which filter or value it got wrong instead of only a bare status code.
+    try:
+        return netbox.get(endpoint, params=params, fallback_endpoint=fallback)
+    except httpx.HTTPStatusError as e:
+        raise _httpx_error_to_value_error(e) from e
 
 
 @mcp.tool
@@ -517,7 +521,10 @@ def netbox_get_object_by_id(
     if brief:
         params["brief"] = "1"
 
-    return netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback)
+    try:
+        return netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback)
+    except httpx.HTTPStatusError as e:
+        raise _httpx_error_to_value_error(e) from e
 
 
 def _httpx_error_to_value_error(exc: httpx.HTTPStatusError) -> ValueError:
@@ -882,7 +889,10 @@ def netbox_get_changelogs(
     params["offset"] = offset
 
     # Make API call
-    return netbox.get(endpoint, params=params)
+    try:
+        return netbox.get(endpoint, params=params)
+    except httpx.HTTPStatusError as e:
+        raise _httpx_error_to_value_error(e) from e
 
 
 @mcp.tool(
