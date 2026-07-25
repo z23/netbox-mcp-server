@@ -534,6 +534,54 @@ def _httpx_error_to_value_error(exc: httpx.HTTPStatusError) -> ValueError:
     return ValueError(f"NetBox API error {exc.response.status_code}: {detail}")
 
 
+# Transport failures that happen before the request reaches NetBox. A mutation
+# cannot have been applied, so the caller may safely retry.
+PRE_SEND_TRANSPORT_ERRORS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ProxyError,
+    httpx.PoolTimeout,
+    httpx.UnsupportedProtocol,
+    httpx.LocalProtocolError,
+)
+
+
+def _ambiguous_write_error(
+    action: str,
+    object_type: str,
+    exc: httpx.TransportError,
+    object_id: int | None = None,
+) -> RuntimeError:
+    """Build the error for a mutation whose outcome is unknown.
+
+    A read timeout or dropped connection after the request was sent leaves no way
+    to tell a committed write from a lost one. Raising a bare transport error here
+    is actively harmful: httpx builds these with an empty message
+    (``str(httpx.ReadTimeout("")) == ""``), so FastMCP surfaces only
+    ``Error calling tool 'netbox_create_object':`` and the obvious next move for
+    an LLM is to retry. For object types with no uniqueness constraint
+    (``ipam.prefix``, ``dcim.cable``, ``ipam.service``, a VRF-scoped
+    ``ipam.ipaddress``) that retry duplicates the record in the source of truth.
+
+    Args:
+        action: Human-readable verb for the attempted mutation (e.g. "Create").
+        object_type: The NetBox object type involved.
+        exc: The transport error raised after the request was sent.
+        object_id: The target object's ID, for update and delete.
+
+    Returns:
+        A RuntimeError stating the outcome is unknown and how to resolve it.
+    """
+    target = f"{object_type} id={object_id}" if object_id is not None else object_type
+    return RuntimeError(
+        f"{action} of {target} was sent to NetBox but no response arrived "
+        f"({type(exc).__name__}). The write MAY have been committed. Do NOT retry "
+        "blindly: confirm the current state first with netbox_get_objects or "
+        "netbox_get_changelogs, because this object type may have no uniqueness "
+        "constraint and a retry could create a duplicate."
+    )
+
+
 def netbox_create_object(
     object_type: str,
     data: dict[str, Any],
@@ -553,6 +601,11 @@ def netbox_create_object(
     Returns:
         On a real call: the created object as a dict (includes server-assigned id, url, created, etc.).
         On dry_run: {"dry_run": True, "object_type": ..., "endpoint": ..., "proposed": <data>}.
+
+    Raises:
+        RuntimeError: If the request reached NetBox but no response arrived. The
+            create MAY have committed — verify with netbox_get_objects before
+            retrying, or a type without a uniqueness constraint gets duplicated.
     """
     if object_type not in NETBOX_OBJECT_TYPES:
         valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
@@ -580,6 +633,15 @@ def netbox_create_object(
         result = netbox.create(endpoint, data, fallback_endpoint=fallback)
     except httpx.HTTPStatusError as e:
         raise _httpx_error_to_value_error(e) from e
+    except PRE_SEND_TRANSPORT_ERRORS:
+        # Never reached NetBox, so nothing was created; a retry is safe.
+        raise
+    except httpx.TransportError as e:
+        logger.warning(
+            f"netbox_create_object: {object_type} sent but unanswered "
+            f"({type(e).__name__}); commit state unknown"
+        )
+        raise _ambiguous_write_error("Create", object_type, e) from e
     logger.info(f"netbox_create_object: {object_type} created id={result.get('id')}")
     return result
 
@@ -607,6 +669,11 @@ def netbox_update_object(
         On dry_run: {"dry_run": True, "object_type": ..., "object_id": ...,
                      "current": <subset of current values for the changed fields>,
                      "proposed": <data>}.
+
+    Raises:
+        RuntimeError: If the request reached NetBox but no response arrived. The
+            update MAY have committed — verify with netbox_get_object_by_id or
+            netbox_get_changelogs before retrying.
     """
     if object_type not in NETBOX_OBJECT_TYPES:
         valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
@@ -643,6 +710,15 @@ def netbox_update_object(
         result = netbox.update(endpoint, object_id, data, fallback_endpoint=fallback)
     except httpx.HTTPStatusError as e:
         raise _httpx_error_to_value_error(e) from e
+    except PRE_SEND_TRANSPORT_ERRORS:
+        # Never reached NetBox, so nothing was changed; a retry is safe.
+        raise
+    except httpx.TransportError as e:
+        logger.warning(
+            f"netbox_update_object: {object_type} id={object_id} sent but unanswered "
+            f"({type(e).__name__}); commit state unknown"
+        )
+        raise _ambiguous_write_error("Update", object_type, e, object_id) from e
     logger.info(f"netbox_update_object: {object_type} id={object_id} updated")
     return result
 
@@ -667,7 +743,14 @@ def netbox_delete_object(
     Returns:
         On a real call: {"deleted": True, "object_type": ..., "object_id": ...}.
         On dry_run: {"dry_run": True, "object_type": ..., "object_id": ...,
-                     "target": <current object>}.
+                     "target": <current object>}. The preview shows the named
+                     object only; NetBox cascades a delete to dependent objects
+                     (a device takes its interfaces and IP assignments with it).
+
+    Raises:
+        RuntimeError: If the request reached NetBox but no response arrived. The
+            delete MAY have committed — verify with netbox_get_object_by_id or
+            netbox_get_changelogs before retrying.
     """
     if object_type not in NETBOX_OBJECT_TYPES:
         valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
@@ -702,6 +785,15 @@ def netbox_delete_object(
         deleted = netbox.delete(endpoint, object_id, fallback_endpoint=fallback)
     except httpx.HTTPStatusError as e:
         raise _httpx_error_to_value_error(e) from e
+    except PRE_SEND_TRANSPORT_ERRORS:
+        # Never reached NetBox, so nothing was deleted; a retry is safe.
+        raise
+    except httpx.TransportError as e:
+        logger.warning(
+            f"netbox_delete_object: {object_type} id={object_id} sent but unanswered "
+            f"({type(e).__name__}); deletion state unknown"
+        )
+        raise _ambiguous_write_error("Delete", object_type, e, object_id) from e
 
     if not deleted:
         raise RuntimeError(

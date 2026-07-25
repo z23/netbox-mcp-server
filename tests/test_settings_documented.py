@@ -62,11 +62,7 @@ def test_deny_list_default_is_not_reproduced_as_a_settable_value():
     """
     settable = re.compile(r"^\s*#?\s*WRITE_DENIED_TYPES\s*=\s*\S")
     for path in (ENV_EXAMPLE, README):
-        offenders = [
-            line
-            for line in path.read_text().splitlines()
-            if settable.match(line)
-        ]
+        offenders = [line for line in path.read_text().splitlines() if settable.match(line)]
         assert not offenders, (
             f"{path.name} offers a concrete WRITE_DENIED_TYPES value: {offenders}. "
             "This goes stale and silently removes protection when pasted. "
