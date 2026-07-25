@@ -1139,10 +1139,15 @@ def discover_plugin_types(client: NetBoxRestClient) -> dict[str, dict[str, str]]
                     "endpoint": endpoint,
                 }
 
-            # Check if there are more pages
-            if not response.get("next"):
+            # Check if there are more pages. Advance by the rows actually received,
+            # not by the requested limit: NetBox clamps page size to MAX_PAGE_SIZE,
+            # so on an instance with MAX_PAGE_SIZE below 100 a fixed += limit skips
+            # every row between the clamped page end and the next offset, silently
+            # dropping those plugin types. The empty-page guard also prevents an
+            # infinite loop if an instance returns `next` with no results.
+            if not response.get("next") or not results:
                 break
-            offset += limit
+            offset += len(results)
 
     except (httpx.HTTPError, ValueError, KeyError) as e:
         logger.warning(f"Plugin discovery failed, continuing with core types only: {e}")

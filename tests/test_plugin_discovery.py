@@ -205,9 +205,52 @@ def test_follows_pagination(client):
 
     assert set(result.keys()) == {"plug_a.thing", "plug_b.thing"}
     assert client.get.call_count == 2
-    # Second call should have advanced the offset
+    # The offset must advance by the rows actually received (1), not by the
+    # requested limit. Advancing by the limit would skip rows 1..99 whenever
+    # NetBox returns fewer rows than asked for.
     second_call_params = client.get.call_args_list[1].kwargs["params"]
-    assert second_call_params["offset"] == 100
+    assert second_call_params["offset"] == 1
+
+
+def test_pagination_does_not_skip_rows_when_netbox_clamps_page_size(client):
+    """A NetBox with MAX_PAGE_SIZE below the requested limit must not lose types.
+
+    Discovery asks for limit=100. An instance clamping to 50 returns 50 rows with
+    `next` pointing at offset=50; advancing by the limit instead would jump to 100
+    and silently drop the types in rows 50..99.
+    """
+    page_1 = {
+        "results": [
+            _plugin_row("plug_a", f"thing{i}", f"/api/plugins/a/things{i}/") for i in range(50)
+        ],
+        "next": "https://netbox.example.com/api/core/object-types/?limit=100&offset=50",
+    }
+    page_2 = {
+        "results": [_plugin_row("plug_b", "thing", "/api/plugins/b/things/")],
+        "next": None,
+    }
+    client.get.side_effect = [page_1, page_2]
+
+    result = discover_plugin_types(client)
+
+    assert client.get.call_count == 2
+    assert client.get.call_args_list[1].kwargs["params"]["offset"] == 50
+    # Nothing from either page is lost.
+    assert len(result) == 51
+    assert "plug_b.thing" in result
+
+
+def test_empty_page_with_next_does_not_loop_forever(client):
+    """A page with `next` set but no rows must terminate, not spin."""
+    client.get.return_value = {
+        "results": [],
+        "next": "https://netbox.example.com/api/core/object-types/?limit=100&offset=100",
+    }
+
+    result = discover_plugin_types(client)
+
+    assert result == {}
+    assert client.get.call_count == 1
 
 
 def test_stops_when_next_missing(client):
