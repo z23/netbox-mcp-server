@@ -236,6 +236,10 @@ DEFAULT_SEARCH_TYPES = [
     "virtualization.virtualmachine",  # VM names
 ]
 
+# Reserved key in netbox_search_objects' result carrying per-type errors and
+# truncation notices. Object types are always "app.model", so this cannot collide.
+SEARCH_META_KEY = "_meta"
+
 mcp = FastMCP("NetBox")
 netbox = None
 
@@ -812,8 +816,23 @@ def netbox_get_changelogs(
         limit: Max results per object type (default 5, max 100)
 
     Returns:
-        Dictionary with object_type keys and list of matching objects.
-        All searched types present in result (empty list if no matches).
+        Dictionary with object_type keys and list of matching objects. Every
+        searched type is present in the result.
+
+        An empty list means no matches ONLY when that type is absent from the
+        '_meta'.'errors' map described below. A '_meta' key is added when any type
+        failed or was truncated, and is absent entirely when every type succeeded
+        in full:
+            - _meta.errors: {object_type: reason} for types NetBox could not search.
+              Their entry is [] but that [] means "unknown", NOT "no matches".
+              DO NOT conclude an object does not exist from a type listed here.
+            - _meta.truncated: {object_type: total_count} when more matches exist
+              than 'limit' returned. Re-query that type with a higher limit or use
+              netbox_get_objects for full pagination.
+
+        Systemic failures (authentication/permission errors, NetBox unreachable or
+        returning 5xx) raise instead of returning partial results, so a failed
+        search is never reported as "no matches".
 
     Example:
         # Search for anything matching "switch"
@@ -822,6 +841,18 @@ def netbox_get_changelogs(
         #   'dcim.device': [{'id': 1, 'name': 'switch-01', ...}],
         #   'dcim.site': [],
         #   ...
+        # }
+
+        # A partially degraded search
+        results = netbox_search_objects('switch')
+        # Returns: {
+        #   'dcim.device': [{'id': 1, 'name': 'switch-01', ...}],
+        #   'dcim.interface': [],
+        #   ...
+        #   '_meta': {
+        #     'errors': {'dcim.interface': 'NetBox returned HTTP 400'},
+        #     'truncated': {'dcim.device': 412},
+        #   },
         # }
 
         # Search for IP address
@@ -844,9 +875,13 @@ def netbox_search_objects(
     object_types: list[str] | None = None,
     fields: list[str] | None = None,
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
-) -> dict[str, list[dict]]:
+) -> dict[str, Any]:
     """
     Perform global search across NetBox infrastructure.
+
+    Returns a dict keyed by object type, each holding the matching rows. A
+    reserved SEARCH_META_KEY entry is added when any type errored or was
+    truncated; see the tool description for the full contract.
     """
     logger = logging.getLogger(__name__)
     search_types = object_types if object_types is not None else DEFAULT_SEARCH_TYPES
@@ -857,12 +892,15 @@ def netbox_search_objects(
             valid_types = "\n".join(f"- {t}" for t in sorted(NETBOX_OBJECT_TYPES.keys()))
             raise ValueError(f"Invalid object_type '{obj_type}'. Must be one of:\n{valid_types}")
 
-    results = {obj_type: [] for obj_type in search_types}
+    results: dict[str, Any] = {obj_type: [] for obj_type in search_types}
+    errors: dict[str, str] = {}
+    truncated: dict[str, int] = {}
 
-    # Build results dictionary. Per-type quirks (e.g. an endpoint that does not
-    # support the `q` search) are skipped with a warning, but systemic failures
-    # (auth errors, NetBox unreachable/too slow) are re-raised so an all-types-
-    # failed search is not returned as a misleading "no results".
+    # Per-type quirks (e.g. an endpoint that does not support the `q` search) are
+    # recorded under SEARCH_META_KEY so an empty list never has to carry two
+    # meanings. Systemic failures (auth errors, NetBox failing or unreachable) are
+    # re-raised, because reporting them per-type would let the caller read "no
+    # matches" as proof an object does not exist.
     for obj_type in search_types:
         try:
             endpoint, fallback = _get_endpoint_info(obj_type)
@@ -875,23 +913,45 @@ def netbox_search_objects(
                 },
                 fallback_endpoint=fallback,
             )
-            # Extract results array from paginated response
-            results[obj_type] = response.get("results", [])
+            rows = response.get("results", [])
+            results[obj_type] = rows
+            # NetBox reports the unpaginated total in `count`; `limit` caps the rows
+            # returned. Without this the caller cannot tell 5-of-5 from 5-of-500.
+            count = response.get("count")
+            if isinstance(count, int) and count > len(rows):
+                truncated[obj_type] = count
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status in (401, 403):
                 # Authentication/permission failure affects every type, not just
                 # this one — surface it instead of masking it as an empty result.
                 raise
-            logger.warning(f"Search skipped '{obj_type}': NetBox returned HTTP {status}")
-            continue
-        except (httpx.ConnectError, httpx.TimeoutException):
-            # NetBox unreachable or too slow affects every type — do not mask.
+            if status >= 500:
+                # NetBox itself is failing (restart, load shedding, upstream 502).
+                # Not a per-type quirk, so do not let it look like an absent object.
+                raise
+            errors[obj_type] = f"NetBox returned HTTP {status}"
+            logger.warning(f"Search failed for '{obj_type}': NetBox returned HTTP {status}")
+        except httpx.TransportError:
+            # Connect/read/timeout/protocol errors all mean NetBox is unreachable or
+            # the connection broke — systemic, so never mask it. TransportError is the
+            # parent of ConnectError, TimeoutException, ReadError, RemoteProtocolError
+            # and ProxyError.
             raise
         except Exception as exc:
-            # Resilient to per-type endpoint quirks: log and move on.
-            logger.warning(f"Search skipped '{obj_type}': {exc}")
-            continue
+            # Resilient to per-type endpoint quirks: record the type and move on.
+            errors[obj_type] = str(exc)
+            logger.warning(f"Search failed for '{obj_type}': {exc}")
+
+    meta: dict[str, Any] = {}
+    if errors:
+        meta["errors"] = errors
+    if truncated:
+        meta["truncated"] = truncated
+    if meta:
+        # Object types always contain a dot ("app.model"), so this key cannot
+        # collide with one. Absent entirely when every type succeeded in full.
+        results[SEARCH_META_KEY] = meta
 
     return results
 
@@ -1038,9 +1098,13 @@ def _register_write_tools(mcp_instance: FastMCP) -> None:
 def _unsafe_runtime_config(settings: Settings) -> str | None:
     """Return an error message if the runtime config is unsafe to start, else None.
 
-    Guards the fail-open case: write tools enabled on the HTTP transport with no
-    bearer token would expose an unauthenticated create/update/delete endpoint.
-    The server refuses to start rather than emitting only a warning.
+    Guards the fail-open cases on the HTTP transport, where the server refuses to
+    start rather than emitting only a warning:
+
+    1. Write tools enabled with no bearer token, which would expose an
+       unauthenticated create/update/delete endpoint.
+    2. Wildcard CORS with no bearer token, which invites any web page to read
+       every NetBox object the token can see.
 
     Args:
         settings: The resolved server settings.
@@ -1048,9 +1112,11 @@ def _unsafe_runtime_config(settings: Settings) -> str | None:
     Returns:
         A human-readable reason to abort startup, or None when the config is safe.
     """
+    if settings.transport != "http":
+        return None
+
     if (
-        settings.transport == "http"
-        and settings.enable_writes
+        settings.enable_writes
         and settings.mcp_auth_token is None
         and not settings.allow_unauthenticated_writes
     ):
@@ -1059,8 +1125,18 @@ def _unsafe_runtime_config(settings: Settings) -> str | None:
             "MCP_AUTH_TOKEN set, which would expose an unauthenticated create/update/"
             "delete endpoint. Set MCP_AUTH_TOKEN (clients then send 'Authorization: "
             "Bearer <token>'), or set ALLOW_UNAUTHENTICATED_WRITES=true to override for "
-            "a trusted, localhost-only deployment."
+            "a deployment you have confirmed is unreachable from untrusted networks."
         )
+
+    if "*" in settings.cors_origins and settings.mcp_auth_token is None:
+        return (
+            "Refusing to start: CORS_ORIGINS includes '*' on the HTTP transport with no "
+            "MCP_AUTH_TOKEN set. That combination lets any web page the operator visits "
+            "read every NetBox object this token can see. Set MCP_AUTH_TOKEN (clients "
+            "then send 'Authorization: Bearer <token>'), or list the specific origins "
+            "your client needs instead of '*'."
+        )
+
     return None
 
 
@@ -1138,6 +1214,25 @@ def main() -> None:
             bind = f"http://{settings.host}:{settings.port}"
         else:
             bind = "stdio"
+
+        # ALLOW_UNAUTHENTICATED_WRITES is documented for localhost-only use, but
+        # nothing can verify that from inside the process — and containers must bind
+        # 0.0.0.0 to be reachable at all, so the flag and a wildcard bind routinely
+        # coexist. Say plainly that only network placement is protecting the endpoint.
+        if (
+            settings.transport == "http"
+            and settings.allow_unauthenticated_writes
+            and settings.mcp_auth_token is None
+            and settings.host in ["0.0.0.0", "::", "[::]"]  # noqa: S104 - checking, not binding
+        ):
+            logger.warning(
+                f"ALLOW_UNAUTHENTICATED_WRITES is set and the server is bound to "
+                f"{settings.host}:{settings.port}, so create/update/delete is reachable "
+                "from every network interface with no authentication whatsoever. Nothing "
+                "in this server restricts that to localhost — only your network placement "
+                "does. Set MCP_AUTH_TOKEN unless you have confirmed the port is "
+                "unreachable from untrusted networks."
+            )
         denied = ", ".join(sorted(write_denied_types)) or "(none)"
         writable_count = len(NETBOX_OBJECT_TYPES)
         logger.warning(
@@ -1190,15 +1285,21 @@ def main() -> None:
                 logger.info("HTTP transport authentication enabled (bearer token required)")
             else:
                 logger.warning(
-                    "HTTP transport is running without authentication. Set "
-                    "MCP_AUTH_TOKEN, or place the server behind an authenticating "
-                    "TLS reverse proxy or gateway before exposing it to a network."
+                    "HTTP transport is running WITHOUT authentication. This is not "
+                    "safe even when bound to localhost: the MCP HTTP transport does "
+                    "not validate the Host or Origin header, so any web page the "
+                    "operator visits can reach this endpoint via DNS rebinding and "
+                    "read every NetBox object this token can see. Set MCP_AUTH_TOKEN "
+                    "(clients then send 'Authorization: Bearer <token>'), or place the "
+                    "server behind an authenticating TLS reverse proxy or gateway."
                 )
             middleware = [
                 Middleware(
                     CORSMiddleware,
                     allow_origins=settings.cors_origins,
-                    allow_methods=["GET", "POST", "OPTIONS"],
+                    # DELETE is how the MCP HTTP transport terminates a session; without
+                    # it browser clients get a 400 on the preflight.
+                    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
                     allow_headers=[
                         "Authorization",
                         "mcp-protocol-version",

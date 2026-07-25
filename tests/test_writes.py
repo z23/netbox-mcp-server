@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from netbox_mcp_server.config import DEFAULT_WRITE_DENIED_TYPES
+from netbox_mcp_server.netbox_types import NETBOX_OBJECT_TYPES
 from netbox_mcp_server.server import (
     netbox_create_object,
     netbox_delete_object,
@@ -262,7 +263,22 @@ def test_http_error_falls_back_to_text_when_body_not_json(mock_netbox):
 
 @pytest.mark.parametrize(
     "denied_type",
-    ["users.token", "users.user", "extras.webhook", "extras.script"],
+    [
+        # Credentials and permissions.
+        "users.token",
+        "users.user",
+        # Code execution and outbound callbacks.
+        "extras.webhook",
+        "extras.script",
+        "extras.eventrule",
+        # Server-rendered Jinja2.
+        "extras.configtemplate",
+        "extras.exporttemplate",
+        # Ingestion path for scripts and templates.
+        "core.datasource",
+        # Destroys field data across every object of its type.
+        "extras.customfield",
+    ],
 )
 @patch("netbox_mcp_server.server.write_denied_types", set(DEFAULT_WRITE_DENIED_TYPES))
 @patch("netbox_mcp_server.server.netbox")
@@ -271,6 +287,15 @@ def test_create_denied_type_refused_by_default(mock_netbox, denied_type):
     with pytest.raises(ValueError, match="deny-list"):
         netbox_create_object(object_type=denied_type, data={"name": "x"})
     mock_netbox.create.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "denied_type",
+    ["extras.configtemplate", "extras.exporttemplate", "core.datasource", "extras.customfield"],
+)
+def test_newly_denied_types_are_real_registry_entries(denied_type):
+    """A deny-list entry only protects anything if it matches a writable type."""
+    assert denied_type in NETBOX_OBJECT_TYPES
 
 
 @patch("netbox_mcp_server.server.write_denied_types", set(DEFAULT_WRITE_DENIED_TYPES))

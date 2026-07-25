@@ -203,10 +203,19 @@ def test_netbox_timeout_rejects_non_positive():
 
 def test_write_denied_types_default_covers_sensitive_types():
     denied = _settings().write_denied_types
+    # Credentials and permissions.
     assert "users.*" in denied
+    # Code execution and outbound callbacks.
     assert "extras.webhook" in denied
     assert "extras.eventrule" in denied
     assert "extras.script" in denied
+    # Server-rendered Jinja2 templates.
+    assert "extras.configtemplate" in denied
+    assert "extras.exporttemplate" in denied
+    # The path by which scripts and templates are ingested.
+    assert "core.datasource" in denied
+    # Deleting one destroys that field's data across every object of its type.
+    assert "extras.customfield" in denied
 
 
 def test_allow_unauthenticated_writes_defaults_false():
@@ -260,3 +269,52 @@ def test_safe_for_stdio_writes_without_auth():
 
     settings = _settings(transport="stdio", enable_writes=True)
     assert _unsafe_runtime_config(settings) is None
+
+
+def test_unsafe_when_wildcard_cors_without_auth():
+    """Wildcard CORS with no token lets any visited web page read NetBox data."""
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="http", cors_origins=["*"])
+    reason = _unsafe_runtime_config(settings)
+    assert reason is not None
+    assert "CORS_ORIGINS" in reason
+
+
+def test_wildcard_cors_safe_when_auth_token_set():
+    """A bearer token is what actually closes the cross-origin read path."""
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="http", cors_origins=["*"], mcp_auth_token="secret")
+    assert _unsafe_runtime_config(settings) is None
+
+
+def test_specific_cors_origins_without_auth_still_start():
+    """Naming explicit origins is not the same affirmative act as '*'."""
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="http", cors_origins=["http://localhost:6274"])
+    assert _unsafe_runtime_config(settings) is None
+
+
+def test_wildcard_cors_safe_for_stdio():
+    """CORS is meaningless without the HTTP transport."""
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(transport="stdio", cors_origins=["*"])
+    assert _unsafe_runtime_config(settings) is None
+
+
+def test_wildcard_cors_not_excused_by_allow_unauthenticated_writes():
+    """ALLOW_UNAUTHENTICATED_WRITES covers the write endpoint, not wildcard CORS."""
+    from netbox_mcp_server.server import _unsafe_runtime_config
+
+    settings = _settings(
+        transport="http",
+        enable_writes=True,
+        allow_unauthenticated_writes=True,
+        cors_origins=["*"],
+    )
+    reason = _unsafe_runtime_config(settings)
+    assert reason is not None
+    assert "CORS_ORIGINS" in reason

@@ -7,7 +7,7 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from netbox_mcp_server.netbox_types import NETBOX_OBJECT_TYPES
-from netbox_mcp_server.server import netbox_search_objects
+from netbox_mcp_server.server import SEARCH_META_KEY, netbox_search_objects
 
 # ============================================================================
 # Parameter Validation Tests
@@ -206,6 +206,129 @@ def test_skips_non_auth_http_error_and_continues(mock_netbox):
 
     assert result["dcim.device"] == []
     assert result["dcim.site"] == []
+
+
+# ============================================================================
+# Result Fidelity Tests
+#
+# An empty list must never be ambiguous between "no matches" and "the query
+# failed" — an operator asking "is this IP allocated?" would otherwise be told
+# no during a NetBox outage and re-allocate a live address.
+# ============================================================================
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+@patch("netbox_mcp_server.server.netbox")
+def test_reraises_on_server_error(mock_netbox, status):
+    """A 5xx means NetBox itself is failing — systemic, so it must not be masked."""
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = status
+    mock_netbox.get.side_effect = httpx.HTTPStatusError(
+        str(status), request=MagicMock(), response=response
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        netbox_search_objects(query="x", object_types=["dcim.device"])
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        httpx.RemoteProtocolError("server disconnected"),
+        httpx.ReadError("read failed"),
+        httpx.ReadTimeout("timed out"),
+        httpx.ProxyError("proxy failed"),
+        httpx.ConnectTimeout("connect timed out"),
+    ],
+)
+@patch("netbox_mcp_server.server.netbox")
+def test_reraises_on_any_transport_error(mock_netbox, exc):
+    """Every httpx.TransportError subclass is systemic, not a per-type quirk.
+
+    RemoteProtocolError in particular is routine on the long-lived pooled client
+    when NetBox reaps an idle keep-alive connection.
+    """
+    mock_netbox.get.side_effect = exc
+
+    with pytest.raises(httpx.TransportError):
+        netbox_search_objects(query="x", object_types=["dcim.device"])
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_per_type_failure_recorded_in_meta_errors(mock_netbox):
+    """A skipped type is named in _meta.errors so its [] cannot be read as absence."""
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = 400
+
+    def side_effect(endpoint, params, fallback_endpoint=None):
+        if "devices" in endpoint:
+            raise httpx.HTTPStatusError("400", request=MagicMock(), response=response)
+        return {"count": 0, "next": None, "previous": None, "results": []}
+
+    mock_netbox.get.side_effect = side_effect
+
+    result = netbox_search_objects(query="x", object_types=["dcim.device", "dcim.site"])
+
+    assert result["dcim.device"] == []
+    assert "dcim.device" in result[SEARCH_META_KEY]["errors"]
+    assert "400" in result[SEARCH_META_KEY]["errors"]["dcim.device"]
+    # The type that genuinely returned nothing is not flagged as an error.
+    assert "dcim.site" not in result[SEARCH_META_KEY].get("errors", {})
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_non_http_per_type_failure_recorded_in_meta_errors(mock_netbox):
+    """Unexpected per-type exceptions are also recorded rather than silently dropped."""
+
+    def side_effect(endpoint, params, fallback_endpoint=None):
+        if "devices" in endpoint:
+            raise ValueError("malformed JSON")
+        return {"count": 0, "next": None, "previous": None, "results": []}
+
+    mock_netbox.get.side_effect = side_effect
+
+    result = netbox_search_objects(query="x", object_types=["dcim.device", "dcim.site"])
+
+    assert result[SEARCH_META_KEY]["errors"]["dcim.device"] == "malformed JSON"
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_truncation_reported_when_count_exceeds_returned_rows(mock_netbox):
+    """A capped result set reports the true total so 5-of-5 is distinguishable from 5-of-412."""
+    mock_netbox.get.return_value = {
+        "count": 412,
+        "next": "http://netbox/api/dcim/devices/?offset=5",
+        "previous": None,
+        "results": [{"id": i, "name": f"sw-{i}"} for i in range(5)],
+    }
+
+    result = netbox_search_objects(query="sw", object_types=["dcim.device"], limit=5)
+
+    assert len(result["dcim.device"]) == 5
+    assert result[SEARCH_META_KEY]["truncated"]["dcim.device"] == 412
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_no_meta_key_when_everything_succeeds_in_full(mock_netbox):
+    """The happy-path result shape is unchanged: no _meta key at all."""
+    mock_netbox.get.return_value = {
+        "count": 1,
+        "next": None,
+        "previous": None,
+        "results": [{"id": 1, "name": "sw-1"}],
+    }
+
+    result = netbox_search_objects(query="sw", object_types=["dcim.device"])
+
+    assert result == {"dcim.device": [{"id": 1, "name": "sw-1"}]}
+    assert SEARCH_META_KEY not in result
+
+
+@patch("netbox_mcp_server.server.netbox")
+def test_meta_key_cannot_collide_with_an_object_type(mock_netbox):
+    """Every registry key is 'app.model', so the reserved key is unambiguous."""
+    assert SEARCH_META_KEY not in NETBOX_OBJECT_TYPES
+    assert all("." in object_type for object_type in NETBOX_OBJECT_TYPES)
 
 
 # ============================================================================

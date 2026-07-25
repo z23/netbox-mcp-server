@@ -28,6 +28,8 @@ Registered MCP tool names (what clients list under `tools/list`):
 | `netbox_get_changelogs` | Retrieves change history records (audit trail) based on filters |
 | `netbox_search_objects` | Global search across common NetBox object types |
 
+> 🔍 **Reading search results**: `netbox_search_objects` returns a dict keyed by object type. An empty list means "no matches" *unless* that type is named in the optional `_meta.errors` map, in which case NetBox could not search it and the result is unknown. `_meta.truncated` reports the true total for any type that had more matches than `limit` returned. `_meta` is absent when every type succeeded in full. Authentication failures and an unreachable or 5xx NetBox raise an error rather than returning partial results, so a failed search is never reported as "no matches".
+
 **Write tools (off by default; set `ENABLE_WRITES=true` to register):**
 
 | Tool | Description |
@@ -38,7 +40,7 @@ Registered MCP tool names (what clients list under `tools/list`):
 
 > ⚠️ **Destructive operations**: `netbox_update_object` and `netbox_delete_object` modify NetBox state. The API token must have write permissions, and every mutation is logged at INFO level by this server and recorded in NetBox's changelog. `netbox_delete_object` requires an explicit `confirm=True` to guard against accidental calls.
 
-> 🔒 **Write safeguards**: Even with writes enabled, the tools refuse to mutate security-critical object types by default (`users.*`, `extras.webhook`, `extras.eventrule`, `extras.script`) as defense-in-depth on top of NetBox token scoping — see `WRITE_DENIED_TYPES`. When the HTTP transport is used with writes enabled but no `MCP_AUTH_TOKEN`, the server **refuses to start** (override with `ALLOW_UNAUTHENTICATED_WRITES=true` for trusted localhost-only use).
+> 🔒 **Write safeguards**: Even with writes enabled, the tools refuse to mutate security-critical object types by default as defense-in-depth on top of NetBox token scoping — see `WRITE_DENIED_TYPES`. The default deny-list covers credentials and permissions (`users.*`), code execution and outbound callbacks (`extras.script`, `extras.webhook`, `extras.eventrule`), server-rendered Jinja2 templates (`extras.configtemplate`, `extras.exporttemplate`), the data sources that ingest scripts and templates into NetBox (`core.datasource`), and `extras.customfield`, whose deletion destroys that field's data on every object of its type. When the HTTP transport is used with writes enabled but no `MCP_AUTH_TOKEN`, the server **refuses to start** (override with `ALLOW_UNAUTHENTICATED_WRITES=true` for trusted localhost-only use).
 
 > Note: Core NetBox object types are always available. Plugin object types can be auto-discovered. See [Plugin Object Type Discovery](#plugin-object-type-discovery). Advanced features (GraphQL, dynamic model discovery, etc.) are deliberately out of scope. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full scope statement and rationale.
 
@@ -193,12 +195,13 @@ The server supports multiple configuration sources with the following precedence
 | `TRANSPORT` | `stdio` \| `http` | `stdio` | No | MCP transport protocol |
 | `HOST` | String | `127.0.0.1` | If HTTP | Host address for HTTP server |
 | `PORT` | Integer | `8000` | If HTTP | Port for HTTP server |
-| `MCP_AUTH_TOKEN` | String | - | No | Bearer token required on the HTTP endpoint. When unset, the HTTP transport is unauthenticated. Clients send `Authorization: Bearer <token>`. |
+| `MCP_AUTH_TOKEN` | String | - | Strongly recommended for HTTP | Bearer token required on the HTTP endpoint. When unset, the HTTP transport is unauthenticated and readable via DNS rebinding even on localhost — see the HTTP security note below. Clients send `Authorization: Bearer <token>`. |
+| `CORS_ORIGINS` | JSON list | `[]` | No | Browser origins allowed for HTTP CORS. `*` allows any origin, but the server **refuses to start** on `*` with no `MCP_AUTH_TOKEN`. |
 | `VERIFY_SSL` | Boolean | `true` | No | Whether to verify SSL certificates |
 | `ENABLE_PLUGIN_DISCOVERY` | Boolean | `false` | No | Auto-discover plugin object types at startup |
 | `ENABLE_WRITES` | Boolean | `false` | No | Register `create_object`/`update_object`/`delete_object` tools. Token must have write permissions in NetBox. |
-| `WRITE_DENIED_TYPES` | JSON list | `["users.*", "extras.webhook", "extras.eventrule", "extras.script"]` | No | Object types the write tools refuse to mutate even when writes are enabled. Entries ending in `.*` match a whole app label. Defense-in-depth on top of token scoping; set to `[]` to disable. |
-| `ALLOW_UNAUTHENTICATED_WRITES` | Boolean | `false` | No | Permit writes on the HTTP transport with no `MCP_AUTH_TOKEN`. When false (default), the server **refuses to start** in that configuration. Set true only for a trusted, localhost-only deployment. |
+| `WRITE_DENIED_TYPES` | JSON list | see [write safeguards](#available-tools) | No | Object types the write tools refuse to mutate even when writes are enabled. Entries ending in `.*` match a whole app label. Defense-in-depth on top of token scoping; set to `[]` to disable. |
+| `ALLOW_UNAUTHENTICATED_WRITES` | Boolean | `false` | No | Permit writes on the HTTP transport with no `MCP_AUTH_TOKEN`. When false (default), the server **refuses to start** in that configuration. Nothing in the server restricts the endpoint to localhost — only your network placement does. |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` \| `CRITICAL` | `INFO` | No | Logging verbosity |
 
 ### Transport Examples
@@ -340,7 +343,9 @@ docker run --rm \
 
 > **Note:** Docker containers require `TRANSPORT=http` since stdio transport doesn't work in containerized environments.
 
-> **⚠️ Security:** The HTTP transport has **no authentication** unless you set `MCP_AUTH_TOKEN`. Binding to `HOST=0.0.0.0` exposes read access to all NetBox data your token can see to anyone who can reach the port. Set a strong `MCP_AUTH_TOKEN` (clients then send `Authorization: Bearer <token>`) and terminate TLS at a reverse proxy or gateway before exposing the server to a network. A bearer token sent over plain HTTP can be intercepted, so TLS is required for real deployments.
+> **⚠️ Security — treat `MCP_AUTH_TOKEN` as mandatory for HTTP:** The HTTP transport has **no authentication** unless you set it, and a localhost bind is *not* sufficient protection. The MCP HTTP transport does not validate the `Host` or `Origin` header, so any web page the operator visits can reach a `127.0.0.1`-bound endpoint via DNS rebinding and read every NetBox object your token can see — sites, devices, IP addresses, tenants and circuits. CORS does not stop this, because rebound requests are same-origin. Binding to `HOST=0.0.0.0` additionally exposes that read access to anyone who can reach the port.
+>
+> Set a strong `MCP_AUTH_TOKEN` (clients then send `Authorization: Bearer <token>`) and terminate TLS at a reverse proxy or gateway before exposing the server to a network. A bearer token sent over plain HTTP can be intercepted, so TLS is required for real deployments. The server refuses to start on the two worst combinations: writes enabled with no token, and `CORS_ORIGINS=*` with no token.
 
 **Connecting to NetBox on your host machine:**
 
