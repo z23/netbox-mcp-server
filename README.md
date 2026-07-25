@@ -28,6 +28,8 @@ Registered MCP tool names (what clients list under `tools/list`):
 | `netbox_get_changelogs` | Retrieves change history records (audit trail) based on filters |
 | `netbox_search_objects` | Global search across common NetBox object types |
 
+> 🔍 **Reading search results**: `netbox_search_objects` returns a dict keyed by object type. An empty list means "no matches" *unless* that type is named in the optional `_meta.errors` map, in which case NetBox could not search it and the result is unknown. `_meta.truncated` reports the true total for any type that had more matches than `limit` returned. `_meta` is absent when every type succeeded in full. Authentication failures and an unreachable or 5xx NetBox raise an error rather than returning partial results, so a failed search is never reported as "no matches".
+
 **Write tools (off by default; set `ENABLE_WRITES=true` to register):**
 
 | Tool | Description |
