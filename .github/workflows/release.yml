@@ -41,6 +41,19 @@ jobs:
       - name: Create or update release PR
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
+          # GITHUB_TOKEN cannot be used here. GitHub deliberately does not start
+          # workflow runs for events raised by GITHUB_TOKEN (a recursion guard),
+          # so a release PR it authors gets no Test & Lint run at all. With
+          # required status checks on main, those contexts never report and the
+          # PR is permanently unmergeable — v1.3.1 had to be unblocked by closing
+          # and reopening the PR by hand.
+          #
+          # RELEASE_PAT is a fine-grained token scoped to this repository with
+          # Contents and Pull requests read/write. The `|| github.token` fallback
+          # keeps this workflow functional if the secret is absent or expires,
+          # at the cost of reintroducing the manual close/reopen step — so if a
+          # release PR ever shows no checks, suspect an expired PAT first.
+          token: ${{ secrets.RELEASE_PAT || github.token }}
           branch: release/next
           base: main
           title: "chore(release): v${{ steps.semrel.outputs.new_version }}"

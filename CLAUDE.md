@@ -102,6 +102,21 @@ If no release PR is dispatched and merged, `main` accumulates released-worthy
 commits while `pyproject.toml` and the newest tag stay behind — the fixes exist
 in the repository but in no artifact anyone can install or pull.
 
+**If a release PR shows no checks and cannot be merged**, the `RELEASE_PAT`
+secret has expired or been removed. `release.yml` opens the PR with that token
+precisely because GitHub does not start workflow runs for events raised by
+`GITHUB_TOKEN`, so a `GITHUB_TOKEN`-authored PR never gets the Test & Lint run
+that `main`'s required status checks demand. Replace the PAT (fine-grained, this
+repo, Contents + Pull requests read/write). To unblock a stuck PR immediately,
+close and reopen it by hand — that raises the `reopened` event under your own
+account and starts the checks.
+
+`main` is protected with those four `test (3.x)` contexts required and
+`enforce_admins` on, so nobody — including admins — can push to it directly.
+`Build & Scan` is deliberately *not* required, because `container-scan.yaml` has
+`paths:` filters and would never report on a PR that touches no Python or
+Docker files, blocking it forever.
+
 ## Code Standards
 
 ### Python Conventions
