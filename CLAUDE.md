@@ -6,7 +6,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that enables
 
 **This is a fork of [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server)** that adds opt-in write tools (create/update/delete) gated behind `ENABLE_WRITES=true`. Upstream is read-only by design; this fork extends that scope. Read-only behavior is preserved as the default — writes only register when explicitly enabled.
 
-**Your role**: Help with features that fit this fork's purpose — a read-by-default NetBox MCP server with opt-in writes. Upstream's `CONTRIBUTING.md` describes the upstream project's scope (read-only, no plugin surface); on this fork, write-tool work is in scope. Challenge proposals that don't fit *this* fork (e.g. plugin object types, GraphQL, removing the write gate). Ask clarifying questions when needed.
+**Your role**: Help with features that fit this fork's purpose — a read-by-default NetBox MCP server with opt-in writes. Upstream's `CONTRIBUTING.md` describes the upstream project's scope; on this fork, write-tool work and runtime plugin discovery are both in scope. Challenge proposals that don't fit *this* fork (e.g. GraphQL, hand-adding plugin types to `netbox_types.py`, removing the write gate). Ask clarifying questions when needed.
 
 ## Tech Stack
 
@@ -43,6 +43,14 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that enables
 ```bash
 # Install dependencies (ONLY use uv, NEVER pip)
 uv sync
+
+# Install the pre-commit hooks (per clone; without this, ruff runs only in CI)
+uv run pre-commit install
+
+# The CI gate — all three must pass before work is done
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
 
 # Run the server locally (requires env vars)
 NETBOX_URL=https://netbox.example.com/ NETBOX_TOKEN=<token> uv run netbox-mcp-server
@@ -81,11 +89,18 @@ This project uses [python-semantic-release](https://python-semantic-release.read
 - Commits with `BREAKING CHANGE:` in the body trigger major version bumps (1.0.0 → 2.0.0)
 - `docs:`, `test:`, `chore:`, `ci:`, `refactor:` commits are logged but don't trigger releases
 
-**Workflow:**
+**Workflow — releases are manual in two steps. Merging a feature PR releases nothing.**
 
-- Merge to `main` automatically triggers release analysis
-- If commits warrant a release, version is bumped and CHANGELOG updated
-- GitHub Release is created with auto-generated release notes
+1. Dispatch the **Release PR** workflow (`release.yml`, `workflow_dispatch` only):
+   `gh workflow run "Release PR"`. It analyses commits since the last tag and
+   opens (or updates) a PR bumping the version and appending the CHANGELOG.
+2. Merge that release PR. `release-finalize.yml` fires on its close, creates the
+   git tag and GitHub Release, then dispatches `docker-publish.yml` with
+   `--ref vX.Y.Z` to build and publish the image.
+
+If no release PR is dispatched and merged, `main` accumulates released-worthy
+commits while `pyproject.toml` and the newest tag stay behind — the fixes exist
+in the repository but in no artifact anyone can install or pull.
 
 ## Code Standards
 
@@ -132,7 +147,7 @@ def get_stuff(t, f):
 ### Architecture Patterns
 
 - **Abstraction layer**: `NetBoxClientBase` defines interface for future ORM implementation
-- **Read-only by default, opt-in writes**: GET tools are always registered. `create_object`/`update_object`/`delete_object` only register when `ENABLE_WRITES=true`; the gate lives in `_register_write_tools()` and is called from `main()`. `delete_object` additionally requires `confirm=True` and supports `dry_run=True`. Mutations are logged at INFO by the tool layer in addition to NetBox's changelog.
+- **Read-only by default, opt-in writes**: GET tools are always registered. `netbox_create_object`/`netbox_update_object`/`netbox_delete_object` only register when `ENABLE_WRITES=true`; the gate lives in `_register_write_tools()` and is called from `main()`. `netbox_delete_object` additionally requires `confirm=True` and supports `dry_run=True`. Mutations are logged at INFO by the tool layer in addition to NetBox's changelog.
 - **Environment-based config**: All secrets via environment variables, never hardcoded
 - **Explicit object mapping**: `NETBOX_OBJECT_TYPES` dictionary maintains allowed types
 
@@ -164,31 +179,58 @@ Tools support core NetBox object types across these modules:
 - **Wireless**: wireless LANs, wireless links
 - **Extras**: config contexts, custom fields, export templates, image attachments, jobs, saved filters, scripts, tags, webhooks
 
-See `NETBOX_OBJECT_TYPES` in `server.py` for complete list.
+See `NETBOX_OBJECT_TYPES` in `netbox_types.py` for the complete list (`server.py` only imports it).
 
 ## Environment Variables
 
-- `NETBOX_URL`: Base URL of NetBox instance (e.g., `https://netbox.example.com/`)
-- `NETBOX_TOKEN`: API token. Read-only is fine for the default tool set; required to have write permissions when `ENABLE_WRITES=true`.
-- `ENABLE_WRITES`: Opt in to `create_object`/`update_object`/`delete_object` tools (default: `false`)
-- `LOG_LEVEL`: Logging verbosity (default: `INFO`, options: `DEBUG`, `WARNING`, `ERROR`)
+Every setting is defined by the `Settings` class in `config.py` — that is the
+single source of truth. The user-facing table is the Configuration Reference in
+`README.md`, which covers all of them. Do not maintain a third list here; it
+drifted to 4 of 14 entries, omitting every security-relevant one.
+
+When adding a setting, update all three in the same commit: `config.py`,
+README.md's table, and `.env.example`. `tests/test_settings_documented.py`
+enforces this and will fail otherwise.
+
+The two that most affect how you reason about a deployment:
+
+- `ENABLE_WRITES`: registers `netbox_create_object` / `netbox_update_object` /
+  `netbox_delete_object` (default `false`)
+- `MCP_AUTH_TOKEN`: bearer token for the HTTP transport. Effectively mandatory
+  for HTTP — the transport validates neither `Host` nor `Origin`, so an
+  unauthenticated endpoint is reachable via DNS rebinding even bound to
+  localhost.
 
 ## Security Considerations
 
 - **Minimal-permission tokens**: Use read-only tokens by default. Only grant write permissions when `ENABLE_WRITES=true` is intentionally set, and even then scope the token to the object types you actually need to mutate.
 - **No credential storage**: Tokens passed via environment, never stored or logged
 - **SSL verification**: Enabled by default in REST client
-- **No plugin support**: Deliberately excludes plugin object types to limit attack surface
+- **No plugin surface by default**: Plugin object types are not compiled into `NETBOX_OBJECT_TYPES`. They are discovered at runtime only when `ENABLE_PLUGIN_DISCOVERY=true` (default `false`), which keeps the default attack surface to core NetBox. Note that enabling discovery *and* `ENABLE_WRITES` makes discovered plugin types writable — `main()` warns about this.
 - **Open source**: All code auditable; report security issues per SECURITY.md
 
 ## Testing Philosophy
 
-Currently no automated test suite. When adding tests:
+There is an automated suite: pytest + pytest-cov, declared in `pyproject.toml`
+under `[dependency-groups] dev`. Run it with `uv run pytest`. CI runs it on
+Python 3.11–3.14 along with `ruff check .` and `ruff format --check .`; all three
+must pass. Never report work as done without running them.
 
-- Test tool behavior with real NetBox instance (Docker-based test environment)
-- Mock external NetBox API calls only when necessary
+`tests/conftest.py` holds an autouse fixture restoring the module-level state
+`main()` mutates (`server.netbox`, `server.write_denied_types`,
+`NETBOX_OBJECT_TYPES`, and any registered write tools). Any new test that calls
+`main()` relies on it — do not remove it, and prefer stubbing side effects over
+letting them happen and be unwound.
+
+When adding tests:
+
+- Mock the NetBox client (`netbox_mcp_server.server.netbox`) rather than requiring
+  a live instance; the suite runs with no NetBox reachable
 - Validate error handling (invalid object types, missing credentials, API errors)
 - Test pagination handling for large result sets
+- Assert on the drift, not on a snapshot, where possible — see
+  `tests/test_settings_documented.py`, which derives its cases from
+  `Settings.model_fields` so adding a setting needs no test edit
 
 ## Do Not
 
@@ -201,8 +243,8 @@ Currently no automated test suite. When adding tests:
 ### Code Quality
 
 - ❌ Register write tools unconditionally — they must stay gated behind `ENABLE_WRITES` and `_register_write_tools()`. Never add `@mcp.tool` directly to a write function.
-- ❌ Remove the `confirm=True` requirement on `delete_object` or the `dry_run` parameter on update/delete without explicit user agreement
-- ❌ Add support for plugin object types (scope limited to core NetBox)
+- ❌ Remove the `confirm=True` requirement on `netbox_delete_object` or the `dry_run` parameter on create/update/delete without explicit user agreement
+- ❌ Hand-add plugin object types to `netbox_types.py` (the compiled registry stays core-only; plugin types arrive via runtime discovery)
 - ❌ Hardcode credentials or NetBox URLs
 - ❌ Bypass the `NetBoxClientBase` abstraction
 - ❌ Remove type hints or comprehensive docstrings
@@ -360,8 +402,8 @@ mcp_tool("netbox_get_changelogs", {
 → Set environment variables before running server
 
 **"Invalid object_type"**
-→ Check `NETBOX_OBJECT_TYPES` dictionary for supported types
-→ Plugin object types are not supported
+→ Check the `NETBOX_OBJECT_TYPES` dictionary in `netbox_types.py` for supported types
+→ Plugin object types resolve only when `ENABLE_PLUGIN_DISCOVERY=true`
 
 **"Connection refused" or timeout**
 → Verify NETBOX_URL is accessible and includes protocol (https://)
