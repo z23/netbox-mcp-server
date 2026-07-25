@@ -82,6 +82,7 @@ def _stub_main_deps(monkeypatch, *, enable_writes: bool):
     settings.netbox_timeout = 30.0
     settings.mcp_auth_token = None
     settings.allow_unauthenticated_writes = False
+    settings.cors_origins = []
     settings.write_denied_types = []
     settings.get_effective_config_summary.return_value = {}
 

@@ -98,7 +98,12 @@ class Settings(BaseSettings):
     """Object types the write tools refuse to mutate (defense-in-depth deny-list)."""
 
     allow_unauthenticated_writes: bool = False
-    """Permit HTTP transport with writes enabled but no MCP_AUTH_TOKEN (trusted localhost only)."""
+    """Permit HTTP transport with writes enabled but no MCP_AUTH_TOKEN.
+
+    The server cannot verify where it is reachable from, and containers must bind
+    0.0.0.0 to be reachable at all. Setting this means network placement is the only
+    thing protecting an unauthenticated create/update/delete endpoint.
+    """
 
     # ===== Security Settings =====
     verify_ssl: bool = True

@@ -1098,9 +1098,13 @@ def _register_write_tools(mcp_instance: FastMCP) -> None:
 def _unsafe_runtime_config(settings: Settings) -> str | None:
     """Return an error message if the runtime config is unsafe to start, else None.
 
-    Guards the fail-open case: write tools enabled on the HTTP transport with no
-    bearer token would expose an unauthenticated create/update/delete endpoint.
-    The server refuses to start rather than emitting only a warning.
+    Guards the fail-open cases on the HTTP transport, where the server refuses to
+    start rather than emitting only a warning:
+
+    1. Write tools enabled with no bearer token, which would expose an
+       unauthenticated create/update/delete endpoint.
+    2. Wildcard CORS with no bearer token, which invites any web page to read
+       every NetBox object the token can see.
 
     Args:
         settings: The resolved server settings.
@@ -1108,9 +1112,11 @@ def _unsafe_runtime_config(settings: Settings) -> str | None:
     Returns:
         A human-readable reason to abort startup, or None when the config is safe.
     """
+    if settings.transport != "http":
+        return None
+
     if (
-        settings.transport == "http"
-        and settings.enable_writes
+        settings.enable_writes
         and settings.mcp_auth_token is None
         and not settings.allow_unauthenticated_writes
     ):
@@ -1119,8 +1125,18 @@ def _unsafe_runtime_config(settings: Settings) -> str | None:
             "MCP_AUTH_TOKEN set, which would expose an unauthenticated create/update/"
             "delete endpoint. Set MCP_AUTH_TOKEN (clients then send 'Authorization: "
             "Bearer <token>'), or set ALLOW_UNAUTHENTICATED_WRITES=true to override for "
-            "a trusted, localhost-only deployment."
+            "a deployment you have confirmed is unreachable from untrusted networks."
         )
+
+    if "*" in settings.cors_origins and settings.mcp_auth_token is None:
+        return (
+            "Refusing to start: CORS_ORIGINS includes '*' on the HTTP transport with no "
+            "MCP_AUTH_TOKEN set. That combination lets any web page the operator visits "
+            "read every NetBox object this token can see. Set MCP_AUTH_TOKEN (clients "
+            "then send 'Authorization: Bearer <token>'), or list the specific origins "
+            "your client needs instead of '*'."
+        )
+
     return None
 
 
@@ -1198,6 +1214,25 @@ def main() -> None:
             bind = f"http://{settings.host}:{settings.port}"
         else:
             bind = "stdio"
+
+        # ALLOW_UNAUTHENTICATED_WRITES is documented for localhost-only use, but
+        # nothing can verify that from inside the process — and containers must bind
+        # 0.0.0.0 to be reachable at all, so the flag and a wildcard bind routinely
+        # coexist. Say plainly that only network placement is protecting the endpoint.
+        if (
+            settings.transport == "http"
+            and settings.allow_unauthenticated_writes
+            and settings.mcp_auth_token is None
+            and settings.host in ["0.0.0.0", "::", "[::]"]  # noqa: S104 - checking, not binding
+        ):
+            logger.warning(
+                f"ALLOW_UNAUTHENTICATED_WRITES is set and the server is bound to "
+                f"{settings.host}:{settings.port}, so create/update/delete is reachable "
+                "from every network interface with no authentication whatsoever. Nothing "
+                "in this server restricts that to localhost — only your network placement "
+                "does. Set MCP_AUTH_TOKEN unless you have confirmed the port is "
+                "unreachable from untrusted networks."
+            )
         denied = ", ".join(sorted(write_denied_types)) or "(none)"
         writable_count = len(NETBOX_OBJECT_TYPES)
         logger.warning(
@@ -1250,15 +1285,21 @@ def main() -> None:
                 logger.info("HTTP transport authentication enabled (bearer token required)")
             else:
                 logger.warning(
-                    "HTTP transport is running without authentication. Set "
-                    "MCP_AUTH_TOKEN, or place the server behind an authenticating "
-                    "TLS reverse proxy or gateway before exposing it to a network."
+                    "HTTP transport is running WITHOUT authentication. This is not "
+                    "safe even when bound to localhost: the MCP HTTP transport does "
+                    "not validate the Host or Origin header, so any web page the "
+                    "operator visits can reach this endpoint via DNS rebinding and "
+                    "read every NetBox object this token can see. Set MCP_AUTH_TOKEN "
+                    "(clients then send 'Authorization: Bearer <token>'), or place the "
+                    "server behind an authenticating TLS reverse proxy or gateway."
                 )
             middleware = [
                 Middleware(
                     CORSMiddleware,
                     allow_origins=settings.cors_origins,
-                    allow_methods=["GET", "POST", "OPTIONS"],
+                    # DELETE is how the MCP HTTP transport terminates a session; without
+                    # it browser clients get a 400 on the preflight.
+                    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
                     allow_headers=[
                         "Authorization",
                         "mcp-protocol-version",
