@@ -11,14 +11,27 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Object types the write tools refuse to mutate by default when ENABLE_WRITES=true.
 # These are security-critical: writing them can mint credentials, grant permissions,
-# or run code. An entry ending in ".*" matches a whole app label (e.g. "users.*").
-# This is defense-in-depth on top of NetBox API-token scoping, and is overridable
-# via the write_denied_types setting (WRITE_DENIED_TYPES).
+# run code, or destroy data well beyond the named object. An entry ending in ".*"
+# matches a whole app label (e.g. "users.*"). This is defense-in-depth on top of
+# NetBox API-token scoping, and is overridable via the write_denied_types setting
+# (WRITE_DENIED_TYPES).
 DEFAULT_WRITE_DENIED_TYPES: list[str] = [
+    # Credentials and permissions.
     "users.*",
+    # Code execution and outbound callbacks.
     "extras.webhook",
     "extras.eventrule",
     "extras.script",
+    # Server-rendered Jinja2 templates — another code-execution path.
+    "extras.configtemplate",
+    "extras.exporttemplate",
+    # Data sources are how scripts and config templates get INTO NetBox. Denying
+    # extras.script while leaving the ingestion mechanism writable would be a hole
+    # in this deny-list's own threat model.
+    "core.datasource",
+    # Deleting a custom field destroys that field's data on every object of its
+    # type, so the blast radius is far larger than the single object named.
+    "extras.customfield",
 ]
 
 

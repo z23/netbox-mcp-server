@@ -203,10 +203,19 @@ def test_netbox_timeout_rejects_non_positive():
 
 def test_write_denied_types_default_covers_sensitive_types():
     denied = _settings().write_denied_types
+    # Credentials and permissions.
     assert "users.*" in denied
+    # Code execution and outbound callbacks.
     assert "extras.webhook" in denied
     assert "extras.eventrule" in denied
     assert "extras.script" in denied
+    # Server-rendered Jinja2 templates.
+    assert "extras.configtemplate" in denied
+    assert "extras.exporttemplate" in denied
+    # The path by which scripts and templates are ingested.
+    assert "core.datasource" in denied
+    # Deleting one destroys that field's data across every object of its type.
+    assert "extras.customfield" in denied
 
 
 def test_allow_unauthenticated_writes_defaults_false():
