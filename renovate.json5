@@ -1,12 +1,18 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: [
-    'github>netboxlabs/renovate',
     'config:recommended',
     ':dependencyDashboard',
     ':semanticCommits',
   ],
-  // Schedule inherited from central config.js (before 4am UTC on weekdays)
+
+  // This fork deliberately extends no org-level preset. It previously extended
+  // 'github>netboxlabs/renovate', which is not reachable from here (404, even
+  // unauthenticated). An unresolvable preset aborts the entire Renovate run, so
+  // no dependency update ever landed. Everything the central config used to
+  // supply — schedule and timezone — is therefore set explicitly below.
+  timezone: 'Etc/UTC',
+  schedule: ['before 4am every weekday'],
 
   labels: ['dependencies'],
 
@@ -64,8 +70,17 @@
     },
   ],
 
+  // Security fixes must not wait for the weekday schedule above. Four advisories
+  // (three HIGH in mcp, one in pydantic-settings) sat unnoticed for nine days
+  // because nothing was raising them at all.
+  // Prioritisation lives in the matchCategories:['security'] packageRule above;
+  // prPriority is not accepted inside vulnerabilityAlerts.
   vulnerabilityAlerts: {
     labels: ['security'],
     minimumReleaseAge: null,
+    schedule: ['at any time'],
   },
+
+  // Raise advisories from the OSV database too, not only GitHub's alerts.
+  osvVulnerabilityAlerts: true,
 }
