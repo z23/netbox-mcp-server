@@ -2,6 +2,64 @@
 
 <!-- version list -->
 
+## v1.3.1 (2026-07-25)
+
+### Bug Fixes
+
+- Audit follow-ups — write-timeout ambiguity, read error bodies, doc drift, test isolation
+  ([#14](https://github.com/z23/netbox-mcp-server/pull/14),
+  [`d5235f7`](https://github.com/z23/netbox-mcp-server/commit/d5235f77bd174155564604479f2f1ad1ad6a0996))
+
+- Close production-readiness gaps in search fidelity, write deny-list, and HTTP transport
+  ([#10](https://github.com/z23/netbox-mcp-server/pull/10),
+  [`04b8304`](https://github.com/z23/netbox-mcp-server/commit/04b8304ab3a12bd09bbde6b5de46fe24accfa813))
+
+- **config**: .env.example reproduced DEFAULT_WRITE_DENIED_TYPES as a
+  ([#14](https://github.com/z23/netbox-mcp-server/pull/14),
+  [`d5235f7`](https://github.com/z23/netbox-mcp-server/commit/d5235f77bd174155564604479f2f1ad1ad6a0996))
+
+- **deps**: Upgrade mcp 1.26.0 -> 1.28.1, pydantic-settings 2.14.1 -> 2.14.2,
+  ([#10](https://github.com/z23/netbox-mcp-server/pull/10),
+  [`04b8304`](https://github.com/z23/netbox-mcp-server/commit/04b8304ab3a12bd09bbde6b5de46fe24accfa813))
+
+- **http**: Harden the HTTP transport against unauthenticated browser access.
+  ([#10](https://github.com/z23/netbox-mcp-server/pull/10),
+  [`04b8304`](https://github.com/z23/netbox-mcp-server/commit/04b8304ab3a12bd09bbde6b5de46fe24accfa813))
+
+- **search**: Stop reporting NetBox failures as empty search results.
+  ([#10](https://github.com/z23/netbox-mcp-server/pull/10),
+  [`04b8304`](https://github.com/z23/netbox-mcp-server/commit/04b8304ab3a12bd09bbde6b5de46fe24accfa813))
+
+- **writes**: Close code-execution and cascade gaps in the write deny-list.
+  ([#10](https://github.com/z23/netbox-mcp-server/pull/10),
+  [`04b8304`](https://github.com/z23/netbox-mcp-server/commit/04b8304ab3a12bd09bbde6b5de46fe24accfa813))
+
+### Chores
+
+- Gate publishing on tests, fix image metadata, correct CLAUDE.md
+  ([#15](https://github.com/z23/netbox-mcp-server/pull/15),
+  [`2a6e40a`](https://github.com/z23/netbox-mcp-server/commit/2a6e40a1a1a9075ef2b9228fe9f297e7e020a126))
+
+- **renovate**: Drop unreachable org preset so the bot can run at all
+  ([#11](https://github.com/z23/netbox-mcp-server/pull/11),
+  [`4257e3d`](https://github.com/z23/netbox-mcp-server/commit/4257e3d6f753695df22d3df1507da13ecf5931b1))
+
+### Continuous Integration
+
+- Chain Docker publish from release finalize via workflow_dispatch
+  ([#9](https://github.com/z23/netbox-mcp-server/pull/9),
+  [`68d137d`](https://github.com/z23/netbox-mcp-server/commit/68d137d1e00c94d85eb2f50189c705244c12258f))
+
+- Publishing now refuses any non-tag ref and rejects an inputs.version
+  ([#15](https://github.com/z23/netbox-mcp-server/pull/15),
+  [`2a6e40a`](https://github.com/z23/netbox-mcp-server/commit/2a6e40a1a1a9075ef2b9228fe9f297e7e020a126))
+
+### Testing
+
+- Protection probe (should be rejected)
+  ([`0bd0dbf`](https://github.com/z23/netbox-mcp-server/commit/0bd0dbf136a1c935d4effc611dc10484c4a3b4fb))
+
+
 ## v1.3.0 (2026-07-16)
 
 First tagged release of the **z23** fork of [netboxlabs/netbox-mcp-server](https://github.com/netboxlabs/netbox-mcp-server).
