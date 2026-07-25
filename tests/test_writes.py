@@ -325,3 +325,111 @@ def test_denied_type_allowed_when_denylist_overridden(mock_netbox):
 
     assert result == {"id": 1}
     mock_netbox.create.assert_called_once()
+
+
+# ============================================================================
+# Ambiguous write outcomes (sent, but unanswered)
+#
+# A transport failure AFTER the request was sent leaves no way to distinguish a
+# committed write from a lost one. Raising the bare httpx error is harmful:
+# str(httpx.ReadTimeout("")) is "", so the model sees an empty message and the
+# obvious next move is a retry — which duplicates rows for types with no
+# uniqueness constraint (ipam.prefix, dcim.cable, ipam.service).
+# ============================================================================
+
+POST_SEND_ERRORS = [
+    httpx.ReadTimeout(""),
+    httpx.WriteTimeout(""),
+    httpx.ReadError("connection reset"),
+    httpx.WriteError("broken pipe"),
+    httpx.RemoteProtocolError("server disconnected"),
+]
+
+PRE_SEND_ERRORS = [
+    httpx.ConnectError("connection refused"),
+    httpx.ConnectTimeout(""),
+    httpx.ProxyError("proxy refused"),
+    httpx.PoolTimeout(""),
+]
+
+
+@pytest.mark.parametrize("exc", POST_SEND_ERRORS, ids=lambda e: type(e).__name__)
+@patch("netbox_mcp_server.server.write_denied_types", set())
+@patch("netbox_mcp_server.server.netbox")
+def test_create_post_send_failure_warns_outcome_unknown(mock_netbox, exc):
+    """A sent-but-unanswered create must say it may have committed."""
+    mock_netbox.create.side_effect = exc
+
+    with pytest.raises(RuntimeError, match="MAY have been committed") as excinfo:
+        netbox_create_object(object_type="ipam.prefix", data={"prefix": "10.0.0.0/24"})
+
+    message = str(excinfo.value)
+    # The message must be actionable, not empty like the underlying httpx error.
+    assert "Do NOT retry" in message
+    assert type(exc).__name__ in message
+    assert excinfo.value.__cause__ is exc
+
+
+@pytest.mark.parametrize("exc", POST_SEND_ERRORS, ids=lambda e: type(e).__name__)
+@patch("netbox_mcp_server.server.write_denied_types", set())
+@patch("netbox_mcp_server.server.netbox")
+def test_update_post_send_failure_warns_outcome_unknown(mock_netbox, exc):
+    mock_netbox.update.side_effect = exc
+
+    with pytest.raises(RuntimeError, match="MAY have been committed") as excinfo:
+        netbox_update_object(object_type="ipam.prefix", object_id=7, data={"status": "active"})
+
+    assert "id=7" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("exc", POST_SEND_ERRORS, ids=lambda e: type(e).__name__)
+@patch("netbox_mcp_server.server.write_denied_types", set())
+@patch("netbox_mcp_server.server.netbox")
+def test_delete_post_send_failure_warns_outcome_unknown(mock_netbox, exc):
+    mock_netbox.delete.side_effect = exc
+
+    with pytest.raises(RuntimeError, match="MAY have been committed") as excinfo:
+        netbox_delete_object(object_type="ipam.prefix", object_id=7, confirm=True)
+
+    assert "id=7" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("exc", PRE_SEND_ERRORS, ids=lambda e: type(e).__name__)
+@patch("netbox_mcp_server.server.write_denied_types", set())
+@patch("netbox_mcp_server.server.netbox")
+def test_pre_send_failures_propagate_unchanged(mock_netbox, exc):
+    """A failure before the request left the client is safe to retry.
+
+    These must NOT be relabelled as ambiguous — doing so would tell the caller to
+    go verify state after a write that provably never happened.
+    """
+    mock_netbox.create.side_effect = exc
+
+    with pytest.raises(type(exc)):
+        netbox_create_object(object_type="ipam.prefix", data={"prefix": "10.0.0.0/24"})
+
+
+@patch("netbox_mcp_server.server.write_denied_types", set())
+@patch("netbox_mcp_server.server.netbox")
+def test_bare_httpx_timeout_message_would_have_been_empty(mock_netbox):
+    """Regression guard for why this handling exists at all."""
+    assert str(httpx.ReadTimeout("")) == ""
+
+    mock_netbox.create.side_effect = httpx.ReadTimeout("")
+    with pytest.raises(RuntimeError) as excinfo:
+        netbox_create_object(object_type="ipam.prefix", data={"prefix": "10.0.0.0/24"})
+
+    assert str(excinfo.value).strip()
+
+
+@patch("netbox_mcp_server.server.write_denied_types", set())
+@patch("netbox_mcp_server.server.netbox")
+def test_http_status_error_still_surfaces_netbox_detail(mock_netbox):
+    """The ambiguous-outcome clauses must not shadow 4xx field-level errors."""
+    response = httpx.Response(400, json={"prefix": ["Invalid prefix format."]})
+    mock_netbox.create.side_effect = httpx.HTTPStatusError(
+        "400", request=MagicMock(), response=response
+    )
+
+    with pytest.raises(ValueError, match="Invalid prefix format"):
+        netbox_create_object(object_type="ipam.prefix", data={"prefix": "nope"})
