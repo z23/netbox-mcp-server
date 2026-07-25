@@ -25,8 +25,16 @@ env:
   IMAGE_NAME: ${{ vars.DOCKERHUB_IMAGE_NAME || github.repository }}
 
 jobs:
+  # Nothing else in this repo gated publication on tests, so a tag on a commit
+  # with a failing suite could ship as :latest. Run the same suite against the
+  # exact tagged commit rather than trusting a check-run from an earlier push.
+  test:
+    name: Tests
+    uses: ./.github/workflows/test.yml
+
   build:
     name: Build (${{ matrix.platform }})
+    needs: test
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
@@ -43,6 +51,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
+      # Published tags are immutable in practice: :latest, :MAJOR and :MAJOR.MINOR
+      # are moved by every stable publish, and :X.Y.Z is cosign-signed and
+      # attested. Without this guard, `--ref main -f version=1.3.0` passes the
+      # shape check below, builds main HEAD, and silently replaces the contents of
+      # an already-released, signed tag. Refuse anything that is not the tag itself.
+      - name: Verify the ref is the release tag
+        id: release
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${REF_TYPE}" != "tag" ]; then
+            echo "::error::Refusing to publish from ${REF_TYPE} '${REF_NAME}'."
+            echo "Images are published only from a vX.Y.Z tag. Re-dispatch with --ref vX.Y.Z."
+            exit 1
+          fi
+          if [ -n "${INPUT_VERSION}" ] && [ "v${INPUT_VERSION#v}" != "${REF_NAME}" ]; then
+            echo "::error::inputs.version='${INPUT_VERSION}' does not match ref '${REF_NAME}'."
+            echo "Omit inputs.version, or pass the version of the tag being published."
+            exit 1
+          fi
+          version="${REF_NAME#v}"
+          # Same strict shape check the merge job applies, repeated here so an
+          # invalid version fails before any layer is pushed by digest.
+          if ! printf '%s' "${version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag '${REF_NAME}' is not semver; expected vX.Y.Z or vX.Y.Z-prerelease."
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${version} from tag ${REF_NAME}."
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
@@ -58,6 +98,11 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          # Stamp the OCI version/revision labels so the published image is
+          # traceable back to the tag and commit it was built from.
+          build-args: |
+            VERSION=${{ steps.release.outputs.version }}
+            REVISION=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,scope=${{ matrix.platform }},mode=max
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
@@ -113,10 +158,13 @@ jobs:
           else
             version="${REF_NAME#v}"
           fi
-          # Guard accidental workflow_dispatch on a branch (e.g. main).
-          if ! printf '%s' "${version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$'; then
+          # Strict semver: X.Y.Z optionally followed by a '-' prerelease. The
+          # previous ([.-].*)? also admitted a 4th dotted component, so
+          # '1.4.0.dev1' passed and then — having no '-' — was classified stable
+          # by the case below and would have moved :latest.
+          if ! printf '%s' "${version}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "Ref/version '${version}' is not a semver tag; aborting."
-            echo "Dispatch with --ref vX.Y.Z or pass inputs.version=X.Y.Z"
+            echo "Expected X.Y.Z or X.Y.Z-prerelease (e.g. 1.3.0, 1.3.0-rc1)."
             exit 1
           fi
           major="${version%%.*}"

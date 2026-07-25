@@ -19,12 +19,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 FROM python:3.14-alpine3.23@sha256:02da11a8d221ca167aa07de20b3cd7104c1f01227f4b02b1fa13cf6517280a81
+
+# Populated by CI from the tag and commit being published; see docker-publish.yml.
+# Defaults keep a local `docker build` honest rather than claiming a real release.
+ARG VERSION=dev
+ARG REVISION=unknown
+
 LABEL org.opencontainers.image.title="NetBox MCP Server" \
-      org.opencontainers.image.description="A read-only MCP server for NetBox" \
-      org.opencontainers.image.url="https://github.com/netboxlabs/netbox-mcp-server" \
-      org.opencontainers.image.source="https://github.com/netboxlabs/netbox-mcp-server" \
-      org.opencontainers.image.vendor="NetBox Labs" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.description="MCP server for NetBox: read-only by default, opt-in write tools via ENABLE_WRITES" \
+      org.opencontainers.image.url="https://github.com/z23/netbox-mcp-server" \
+      org.opencontainers.image.source="https://github.com/z23/netbox-mcp-server" \
+      org.opencontainers.image.documentation="https://github.com/z23/netbox-mcp-server/blob/main/README.md" \
+      org.opencontainers.image.vendor="z23" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
 ENV PYTHONUNBUFFERED=1
 
 RUN apk update && apk upgrade --no-cache \
