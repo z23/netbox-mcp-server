@@ -1,8 +1,11 @@
 name: Test & Lint
 
 on:
-  - push
-  - pull_request
+  push:
+  pull_request:
+  # Callable so release publishing can gate on the same checks rather than
+  # trusting a check-run recorded earlier against a different commit.
+  workflow_call:
 
 permissions:
   contents: read
